@@ -211,20 +211,6 @@ void report::expressionPruning(std::unique_ptr<ExprTree>& node)
     UnaryOperator const * unExpr = llvm::dyn_cast<UnaryOperator>( expr );
     CXXOperatorCallExpr const * overload = llvm::dyn_cast<CXXOperatorCallExpr>( expr );
         
-    //if ( overload == nullptr ) {  }
-    //else { 
-    //    overload->dump(); 
-    //    auto callee = overload->getCalleeDecl();
-    //    if (callee == nullptr) { log("null");  }
-    //    callee->dump();
-
-    //    CXXMethodDecl const * method = llvm::dyn_cast<CXXMethodDecl>( callee );
-
-    //    if (method == nullptr) {
-    //        log("null");
-    //    }
-    //}
-
     if ( evaluated ) {
         //expression can be removed if no effects are present 
 
