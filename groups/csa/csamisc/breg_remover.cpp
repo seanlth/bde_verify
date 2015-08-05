@@ -37,10 +37,6 @@ struct ExprTree {
     std::string op;
 
     bool removable;
-    bool replaceable;
-    bool evaluated;
-    bool value;
-    bool sideEffects;
     bool binary;
 
     ExprTree(std::unique_ptr<ExprTree> lhs, std::unique_ptr<ExprTree> rhs, bool removable, Expr const * clangNode) {
@@ -49,32 +45,7 @@ struct ExprTree {
         this->clangNode = clangNode;
 
         this->removable = removable;
-        this->replaceable = false;
-        this->evaluated = false;
-
         this->binary = false;
-        this->value = false;
-        this->sideEffects = false;
-    }
-
-    void dump() {
-        std::cout << "Removable: " << this->removable << "\n";
-        std::cout << "Type: " << ( this->binary ? "Binary" : "Unary" ) << "\n";
-        std::cout << "-------------\n";
-
-        if (binary) {
-            if ( this->lhs != nullptr ) {
-                this->lhs->dump();
-            }
-            if ( this->rhs != nullptr ) {
-                 this->rhs->dump();
-            }
-        }
-        else {
-            if ( this->lhs != nullptr ) {
-                this->lhs->dump();
-            }
-        }
     }
 };
 
@@ -86,14 +57,20 @@ struct data {
 
 struct report : Report<data>
 {
-    INHERIT_REPORT_CTOR(report, Report, data);
-    
+    //INHERIT_REPORT_CTOR(report, Report, data);
+   
+    report(Analyser& analyser, PPObserver::CallbackType type = PPObserver::e_None);
+
+
+
     //used to store else stmts removed removed
     std::vector<Stmt const*> elsesRemoved;
 
     //stores location of breg if stmts
     std::vector<unsigned> bregLocations;
+    std::vector<std::string> bregNames;
 
+    void readCSV();
 
     void addChainedElses(Stmt const * stmt);
     bool hasVarDecls(CompoundStmt const * decl);
@@ -102,12 +79,13 @@ struct report : Report<data>
     void expressionPruning(std::unique_ptr<ExprTree>& node);
     void rebuildCondition(std::unique_ptr<ExprTree>& node);
     void removeBranch(std::unique_ptr<ExprTree>& node, Expr const * expr);
-    void replaceBranch(std::unique_ptr<ExprTree>& node, Expr const * expr);
 
     std::string getExprString(Expr const * expr);
 
     void matchIf(BoundNodes const & nodes);
     void operator()();
+    void operator()(SourceLocation where, bool, std::string const& name); 
+
 };
 
 
@@ -117,6 +95,51 @@ static const internal::DynTypedMatcher& dyn_matchIf()
     static const internal::DynTypedMatcher& matcher = findAll( functionDecl( hasDescendant( stmt ( findAll (                                                                                                                    ifStmt( hasCondition(    expr(  ).bind("expr") ) ).bind("ifstmt")
                                                                    ) ) ) ).bind("func") );
     return matcher; 
+}
+
+report::report(Analyser& analyser, PPObserver::CallbackType type)
+    : Report<data>(analyser, type)
+{
+    readCSV();
+
+    llvm::SmallVector<llvm::StringRef, 1000> bregNamesFromConfig;
+    llvm::StringRef(a.config()->value("breg_names"))
+        .split(bregNamesFromConfig, " ", -1, false);
+
+    for (size_t i = 0; i < bregNamesFromConfig.size(); i++) {
+        std::vector<std::string> e = Config::brace_expand(bregNamesFromConfig[i]);
+        bregNames.insert(bregNames.end(), e.begin(), e.end());
+    }
+}
+
+void report::readCSV() 
+{
+    std::ifstream bregFile;
+    bregFile.open("csv");
+    if ( bregFile.is_open() ) {
+        std::string locStr;
+        while ( std::getline(bregFile, locStr, ',') ) {
+            std::cout << locStr << std::endl;
+            //bregLocations.push_back( atoi(locStr.c_str()) );
+        }
+    }
+    else {
+        return; //nothing to be done, no bregs found
+    }
+    bregFile.close();
+
+}
+
+void report::operator()(SourceLocation where, bool, std::string const& name)
+{
+    for (std::string bregName : bregNames) {
+        //std::cout << bregName << std::endl;
+
+        if ( name.find( bregName ) != std::string::npos ) {
+            SourceRange range = SourceRange(where, where.getLocWithOffset(11 + name.length()));  //#include <> + name.length
+            a.ReplaceText(a.get_full_range(range), "");
+        }
+    }
 }
 
 
@@ -209,31 +232,10 @@ void report::expressionPruning(std::unique_ptr<ExprTree>& node)
 
     BinaryOperator const * binExpr = llvm::dyn_cast<BinaryOperator>( expr ); 
     UnaryOperator const * unExpr = llvm::dyn_cast<UnaryOperator>( expr );
-    CXXOperatorCallExpr const * overload = llvm::dyn_cast<CXXOperatorCallExpr>( expr );
         
     if ( evaluated ) {
-        //expression can be removed if no effects are present 
-
-        node->evaluated = true;
-
-        bool hasPossibleSideEffects = node->clangNode->HasSideEffects( *a.context() );
-        node->value = expressionValue;
-
-        //expression has no side-effects, parent has no side-effects 
-        if ( hasPossibleSideEffects == false && node->sideEffects == false ) { //this includes function calls
-            node->removable = true;
-            return;
-        }
-        else if ( hasPossibleSideEffects == false ) { //expression has no side-effects but parent does
-            //expression is able to be evaluated but left and right side can't be removed only replaced
-            log("replaceable");
-            node->replaceable = true;
-            return;
-        }
-        else {
-            log("side effects");
-            node->sideEffects = true;
-        }                 
+        node->removable = true;
+        return;
     }
 
     if ( binExpr != nullptr ) {
@@ -242,9 +244,7 @@ void report::expressionPruning(std::unique_ptr<ExprTree>& node)
         Expr const * rhs = binExpr->getRHS();
         
         std::unique_ptr<ExprTree> nodeLHS( new ExprTree(nullptr, nullptr, false, lhs) );
-        nodeLHS->sideEffects = node->sideEffects;
         std::unique_ptr<ExprTree> nodeRHS( new ExprTree(nullptr, nullptr, false, rhs) );
-        nodeRHS->sideEffects = node->sideEffects;
 
         expressionPruning( nodeLHS );
         expressionPruning( nodeRHS );
@@ -253,12 +253,6 @@ void report::expressionPruning(std::unique_ptr<ExprTree>& node)
         node->rhs = std::move(nodeRHS);
         node->binary = true;
         node->op = binExpr->getOpcodeStr().str();
-
-        node->sideEffects = node->lhs->sideEffects || node->rhs->sideEffects;
-        node->removable = !node->sideEffects && node->evaluated;
-
-        log(node->sideEffects);
-        log(node->removable);
     }
     else if ( unExpr != nullptr ) {
         Expr const * sub = unExpr->getSubExpr();
@@ -269,17 +263,6 @@ void report::expressionPruning(std::unique_ptr<ExprTree>& node)
         node->lhs = std::move(nodeSub);
         node->binary = false;
         node->op = UnaryOperator::getOpcodeStr(unExpr->getOpcode()).str();
-
-        node->sideEffects = node->lhs->sideEffects;
-        node->removable = !node->sideEffects && node->evaluated;
-    }
-    else if ( overload != nullptr ) {
-        std::string op = clang::getOperatorSpelling( overload->getOperator() );
-
-        if ( op == "==" || 
-             op == "!=" ) {
-            node->sideEffects = false;
-        }
     }
 }
 
@@ -288,60 +271,26 @@ void report::rebuildCondition(std::unique_ptr<ExprTree>& node)
 {
     if ( node->binary ) {
         //only one branch will ever be removed 
-        if ( !node->lhs->removable && !node->lhs->replaceable ) {
+        if ( !node->lhs->removable ) {
             rebuildCondition( node->lhs );
         }
         else if ( node->op == "&&" || node->op == "||" ) {
-            if ( node->lhs->removable ) {
-                removeBranch(node->rhs, node->clangNode);
-            }
-            else if ( node->lhs->replaceable ) {
-                replaceBranch(node->lhs, node->lhs->clangNode);
-            }
+            removeBranch(node->rhs, node->clangNode);
         }
 
         if ( !node->rhs->removable ) {
             rebuildCondition( node->rhs );
         }
         else if ( node->op == "&&" || node->op == "||" )  {
-            if ( node->rhs->removable ) {
-                removeBranch(node->lhs, node->clangNode);
-            }
-            else if ( node->rhs->replaceable ) {
-                replaceBranch(node->rhs, node->rhs->clangNode);
-            }
+            removeBranch(node->lhs, node->clangNode);
         }
     }
     else if ( node->lhs != nullptr ) {
-        if ( !node->lhs->removable && !node->lhs->replaceable ) {
+        if ( !node->lhs->removable ) {
             rebuildCondition( node->lhs );
-        }
-        else {
-            //if ( node->lhs->removeable ) {
-            //    removeBranch(node->lhs, node->clangNode);
-            //}
-            //else if ( node->lhs->replaceable ) {
-            //    replaceBranch(node->rhs, node->rhs->clangNode);
-            //}
-
-
-            //removeBranch(node->lhs, node->clangNode);
         }
     }
 }
-
-
-void report::replaceBranch(std::unique_ptr<ExprTree>& node, Expr const * expr)
-{
-    SourceLocation end = m.getFileLoc(Lexer::getLocForEndOfToken( expr->getLocEnd(), 0, m, a.context()->getLangOpts()));
-    SourceRange rangeToBeReplaced = SourceRange( expr->getLocStart(), end );
-     
-    unsigned length = rangeToBeReplaced.getEnd().getRawEncoding() - rangeToBeReplaced.getBegin().getRawEncoding();
-    std::string replacement = (node->value ? "true" : "false");
-    Replacement replace = Replacement( a.manager(), rangeToBeReplaced.getBegin(), length, replacement );
-    replace.apply( a.rewriter() );
-}
-
 
 void report::removeBranch(std::unique_ptr<ExprTree>& node, Expr const * expr)
 {
@@ -386,29 +335,8 @@ void report::matchIf(BoundNodes const & nodes)
     bool expressionValue = true;
     bool evaluated = ifStmt->getCond()->EvaluateAsBooleanCondition(expressionValue, *d_analyser.context());
 
-    bool hasPossibleSideEffects = ifStmt->getCond()->HasSideEffects( *a.context() );
 
-    bool modifyIf = false;
-
-    if ( evaluated && !hasPossibleSideEffects ) {
-        log("1");
-        modifyIf = true;
-    }
-    else {
-        std::unique_ptr<ExprTree> node( new ExprTree(nullptr, nullptr, false, ifStmt->getCond()) );
-
-        expressionPruning( node );
-        
-        if ( node->removable == true ) {
-            log("2");
-            modifyIf = true;
-        }
-        else { // if stmt cannot be altered, branches of condition expression may be removed though 
-            rebuildCondition( node );
-        }
-    }
-
-    if ( modifyIf ) { // if stmt can change immediately, either the body can go or the condition can go
+    if ( evaluated ) { // if stmt can change immediately, either the body can go or the condition can go
 
         Stmt const * elseStmt = ifStmt->getElse();
 
@@ -457,11 +385,19 @@ void report::matchIf(BoundNodes const & nodes)
         Replacement replace = Replacement( a.manager(), rangeToBeReplaced.getBegin(), length, replacement );
         replace.apply( a.rewriter() );
     }
+    else {
+        std::unique_ptr<ExprTree> node( new ExprTree(nullptr, nullptr, false, ifStmt->getCond()) );
+
+        expressionPruning( node );
+        
+        // if stmt cannot be altered, branches of condition expression may be removed though 
+        rebuildCondition( node );
+    }
 }
 
 
 void subscribe(Analyser& analyser, Visitor& visitor, PPObserver& observer) {
-
+    observer.onInclude += report(analyser);
     analyser.onTranslationUnitDone += report(analyser); 
 }
 
