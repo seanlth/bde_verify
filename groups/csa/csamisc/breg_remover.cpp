@@ -278,6 +278,11 @@ void report::removeBranch(std::unique_ptr<ExprTree>& node, Expr const * expr)
     unsigned length = rangeToBeReplaced.getEnd().getRawEncoding() - rangeToBeReplaced.getBegin().getRawEncoding();
     Replacement replace = Replacement( a.manager(), rangeToBeReplaced.getBegin(), length, getExprString(node->clangNode) );
     replace.apply( a.rewriter() );
+
+    rangeToBeReplaced.getBegin().dump(a.manager());
+    std::cout << ": ";
+    std::cout << "replacing: " << a.get_source(rangeToBeReplaced).str();
+    std::cout << " with: " << getExprString(node->clangNode) << std::endl;
 }
 
 std::string report::getExprString(Expr const * expr) 
