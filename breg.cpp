@@ -1,19 +1,14 @@
 #include <string>
 
-#include <breg_markup.h>
-#include <bbit/200911/bbit_send_to_omx.h>                
+#include "/bbsrc/thirdparty/bbit/include/bbit/200911/bbit_send_to_omx.h"                
+
+#define bregT__value() q(5)
+#define bregF__value() g()
 
 
-bool bregT() {
-    return false;
-}
 
-bool bregF() {
-    return false;
-}
-
-bool q() {
-    return false;
+bool q(int i) {
+    return true;
 }
 
 bool g() {
@@ -24,10 +19,12 @@ void call() {}
 
 void f() 
 {
-    if ( bbit_send_to_omx__value() ) {
-        
+    if (bbit_send_to_omx__value()) {
+        int i = 0;
     }
 
+    if ( bregT__value() ) {int i = 0;}
+    
 
 /*
     // test for leaving braces behind
@@ -152,9 +149,9 @@ void f()
     if ( bregT() ) {  }
 */
 
-    if ( !(bregT() == false) || q() ) {
-        int var = 1; 
-    }
+//    if ( !(bregT() == false) || q() ) {
+//        int var = 1; 
+//    }
 
     
 

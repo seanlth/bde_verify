@@ -99,8 +99,6 @@ static const internal::DynTypedMatcher& dyn_matchIf()
 report::report(Analyser& analyser, PPObserver::CallbackType type)
     : Report<data>(analyser, type)
 {
-    std::string csv = a.config()->value("breg_file");
-   
     std::string csvFile = a.config()->value("breg_file"); 
         
     auto arr = readCSV(csvFile);
