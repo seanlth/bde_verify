@@ -19,7 +19,7 @@ void call() {}
 
 void f() 
 {
-    if (bbit_send_to_omx__value()) {
+    if (bbit_send_to_omx__value() && q(1)) {
         int i = 0;
     }
 

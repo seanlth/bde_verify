@@ -63,8 +63,8 @@ namespace {
     static const internal::DynTypedMatcher& dyn_matchBreg()
     {
         static const internal::DynTypedMatcher& matcher = findAll( functionDecl( hasDescendant( 
-                        stmt ( findAll (                                                                                                                                           ifStmt( hasCondition( expr( findAll( 
-                                                callExpr().bind("call"))))).bind("ifstmt") )))));
+                                                             stmt ( findAll (                                                                                                                                                       ifStmt( hasCondition( expr( findAll( 
+                                                                    callExpr().bind("call"))))).bind("ifstmt") )))));
         return matcher; 
     }
 
@@ -130,9 +130,7 @@ namespace {
 
 
     void subscribe(Analyser& analyser, Visitor& visitor, PPObserver& observer) {
-        //observer.onInclude += report(analyser);
         analyser.onTranslationUnitDone += report(analyser);
-
     }
 
 }  // close anonymous namespace

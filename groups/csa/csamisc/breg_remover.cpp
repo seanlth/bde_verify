@@ -70,17 +70,16 @@ struct report : Report<data>
     std::vector<unsigned> bregLocations;
     std::vector<std::string> bregNames;
 
-    void addChainedElses(Stmt const * stmt);
-    bool hasVarDecls(CompoundStmt const * stmt);
-
+    std::string getExprString(Expr const * expr);
     std::string getStmtBodyReplacement(CompoundStmt const * stmt, unsigned column);
 
+    bool hasVarDecls(CompoundStmt const * stmt);
+
+    void addChainedElses(Stmt const * stmt);
     void expressionPruning(std::unique_ptr<ExprTree>& node);
     void rebuildCondition(std::unique_ptr<ExprTree>& node);
     void removeBranch(std::unique_ptr<ExprTree>& node, Expr const * expr);
-
-    std::string getExprString(Expr const * expr);
-
+    
     void matchIf(BoundNodes const & nodes);
     void operator()();
     void operator()(SourceLocation where, bool, std::string const& name); 
@@ -91,8 +90,8 @@ struct report : Report<data>
 //matches string initialization as a variable or in an initialization list
 static const internal::DynTypedMatcher& dyn_matchIf()
 {
-    static const internal::DynTypedMatcher& matcher = findAll( functionDecl( hasDescendant( stmt ( findAll (                                                                                                                    ifStmt( hasCondition(    expr(  ).bind("expr") ) ).bind("ifstmt")
-                                                                   ) ) ) ).bind("func") );
+    static const internal::DynTypedMatcher& matcher = findAll( functionDecl( hasDescendant( stmt ( findAll (                                                                                                                    ifStmt( hasCondition( expr().bind("expr"))).bind("ifstmt")
+                                                                   )))).bind("func");
     return matcher; 
 }
 
@@ -110,6 +109,7 @@ report::report(Analyser& analyser, PPObserver::CallbackType type)
     }
 }
 
+//remove includes
 void report::operator()(SourceLocation where, bool, std::string const& name)
 {
     for (std::string bregName : bregNames) {
@@ -152,7 +152,6 @@ void report::addChainedElses(Stmt const * stmt) {
         elsesRemoved.push_back(ifStmt);
         addChainedElses(ifStmt->getElse());
     }
-
 }
 
 bool report::hasVarDecls(CompoundStmt const * stmt)
@@ -312,12 +311,8 @@ void report::matchIf(BoundNodes const & nodes)
         }
     }
 
-    std::string tag = "BR01";
-    std::string message = "";
-    
     bool expressionValue = true;
     bool evaluated = ifStmt->getCond()->EvaluateAsBooleanCondition(expressionValue, *d_analyser.context());
-
 
     if ( evaluated ) { // if stmt can change immediately, either the body can go or the condition can go
 
@@ -368,12 +363,10 @@ void report::matchIf(BoundNodes const & nodes)
         Replacement replace = Replacement( a.manager(), rangeToBeReplaced.getBegin(), length, replacement );
         replace.apply( a.rewriter() );
     }
-    else {
+    else { // if stmt cannot be altered, branches of condition expression may be removed though 
         std::unique_ptr<ExprTree> node( new ExprTree(nullptr, nullptr, false, ifStmt->getCond()) );
 
         expressionPruning( node );
-        
-        // if stmt cannot be altered, branches of condition expression may be removed though 
         rebuildCondition( node );
     }
 }
