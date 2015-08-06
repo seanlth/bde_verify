@@ -17,6 +17,8 @@
 #include <iostream>
 #include <fstream>
 
+#include "breg_replacer.h"
+
 #define log(s) (std::cout << s << std::endl )
 
 using namespace csabase;
@@ -61,8 +63,6 @@ struct report : Report<data>
    
     report(Analyser& analyser, PPObserver::CallbackType type = PPObserver::e_None);
 
-
-
     //used to store else stmts removed removed
     std::vector<Stmt const*> elsesRemoved;
 
@@ -70,10 +70,9 @@ struct report : Report<data>
     std::vector<unsigned> bregLocations;
     std::vector<std::string> bregNames;
 
-    void readCSV();
-
     void addChainedElses(Stmt const * stmt);
-    bool hasVarDecls(CompoundStmt const * decl);
+    bool hasVarDecls(CompoundStmt const * stmt);
+
     std::string getStmtBodyReplacement(CompoundStmt const * stmt, unsigned column);
 
     void expressionPruning(std::unique_ptr<ExprTree>& node);
@@ -100,41 +99,22 @@ static const internal::DynTypedMatcher& dyn_matchIf()
 report::report(Analyser& analyser, PPObserver::CallbackType type)
     : Report<data>(analyser, type)
 {
-    readCSV();
+    std::string csv = a.config()->value("breg_file");
+   
+    std::string csvFile = a.config()->value("breg_file"); 
+        
+    auto arr = readCSV(csvFile);
 
-    llvm::SmallVector<llvm::StringRef, 1000> bregNamesFromConfig;
-    llvm::StringRef(a.config()->value("breg_names"))
-        .split(bregNamesFromConfig, " ", -1, false);
+    bregNames.resize(arr.size());
 
-    for (size_t i = 0; i < bregNamesFromConfig.size(); i++) {
-        std::vector<std::string> e = Config::brace_expand(bregNamesFromConfig[i]);
-        bregNames.insert(bregNames.end(), e.begin(), e.end());
+    for ( auto e : arr ) {
+        bregNames.push_back(e.first);
     }
-}
-
-void report::readCSV() 
-{
-    std::ifstream bregFile;
-    bregFile.open("csv");
-    if ( bregFile.is_open() ) {
-        std::string locStr;
-        while ( std::getline(bregFile, locStr, ',') ) {
-            std::cout << locStr << std::endl;
-            //bregLocations.push_back( atoi(locStr.c_str()) );
-        }
-    }
-    else {
-        return; //nothing to be done, no bregs found
-    }
-    bregFile.close();
-
 }
 
 void report::operator()(SourceLocation where, bool, std::string const& name)
 {
     for (std::string bregName : bregNames) {
-        //std::cout << bregName << std::endl;
-
         if ( name.find( bregName ) != std::string::npos ) {
             SourceRange range = SourceRange(where, where.getLocWithOffset(11 + name.length()));  //#include <> + name.length
             a.ReplaceText(a.get_full_range(range), "");
