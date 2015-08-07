@@ -26,5 +26,5 @@ then
     rm $1\-rewritten
     echo "breg removal error"
 else
-    mv $1\-rewritten\-rewritten $1\-rewritten  
+    mv $1\-rewritten\-rewritten $1\-rewritten.cpp  
 fi

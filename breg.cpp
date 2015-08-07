@@ -19,10 +19,30 @@ void call() {}
 
 void f() 
 {
+    bool i = bbit_send_to_omx__value();
+    
+
+
+    if (i) {
+        int asd = 0;
+    }
+    else {
+        int asd2 = 0;
+    }
+
+    if (i == false) {
+        int a = 0;
+    }
+
+    
+
+
+
+ 
     if (bbit_send_to_omx__value() && q()) {
         int i = 0;
     }
-
+    
     if ( bregT__value() ) {int i = 0;}
     
 
@@ -161,7 +181,6 @@ void f()
     //if ( ( asd == "something" || asd == "something else" ) && bregF__value() ) {
     //    v1 = 1;
     //}
-
 
 
 }

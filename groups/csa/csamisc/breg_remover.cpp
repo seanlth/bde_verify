@@ -39,6 +39,8 @@ struct ExprTree {
     std::string op;
 
     bool removable;
+    bool evaluated;
+    bool sideEffects;
     bool binary;
 
     ExprTree(std::unique_ptr<ExprTree> lhs, std::unique_ptr<ExprTree> rhs, bool removable, Expr const * clangNode) {
@@ -47,6 +49,9 @@ struct ExprTree {
         this->clangNode = clangNode;
 
         this->removable = removable;
+        this->evaluated = false;
+        this->sideEffects = false;
+
         this->binary = false;
     }
 };
@@ -74,6 +79,8 @@ struct report : Report<data>
     std::string getStmtBodyReplacement(CompoundStmt const * stmt, unsigned column);
 
     bool hasVarDecls(CompoundStmt const * stmt);
+
+    bool sideEffectAnalysis(FunctionDecl const * f);
 
     void addChainedElses(Stmt const * stmt);
     void expressionPruning(std::unique_ptr<ExprTree>& node);
@@ -196,6 +203,17 @@ std::string report::getStmtBodyReplacement(CompoundStmt const * stmt, unsigned c
     return replacement;
 }
 
+bool report::sideEffectAnalysis(FunctionDecl const * f)
+{
+    if ( f->hasBody() ) {
+        CompoundStmt const * body = llvm::dyn_cast<CompoundStmt>( f->getBody() );
+        if ( body->size() > 15 ) {
+            return true;
+        }   
+    }
+    return false;
+}
+
 
 //any sub expression that can be evaluated can be removed or replaced 
 //the branches of the parent node will only ever reduce to the identity element for that logical operator
@@ -209,10 +227,21 @@ void report::expressionPruning(std::unique_ptr<ExprTree>& node)
 
     BinaryOperator const * binExpr = llvm::dyn_cast<BinaryOperator>( expr ); 
     UnaryOperator const * unExpr = llvm::dyn_cast<UnaryOperator>( expr );
+    CallExpr const * call = llvm::dyn_cast<CallExpr>( expr );
+    CXXBoolLiteralExpr const * boolLiteral = llvm::dyn_cast<CXXBoolLiteralExpr>( expr );
         
     if ( evaluated ) {
-        node->removable = true;
-        return;
+        node->evaluated = true;
+
+        bool hasPossibleSideEffects = node->clangNode->HasSideEffects( *a.context() );
+
+        if ( hasPossibleSideEffects == false && node->sideEffects == false ) {
+            node->removable = true;
+            return;
+        }
+        else {
+            node->sideEffects = true;
+        }
     }
 
     if ( binExpr != nullptr ) {
@@ -222,6 +251,9 @@ void report::expressionPruning(std::unique_ptr<ExprTree>& node)
         
         std::unique_ptr<ExprTree> nodeLHS( new ExprTree(nullptr, nullptr, false, lhs) );
         std::unique_ptr<ExprTree> nodeRHS( new ExprTree(nullptr, nullptr, false, rhs) );
+        
+        nodeLHS->sideEffects = node->sideEffects;
+        nodeRHS->sideEffects = node->sideEffects;
 
         expressionPruning( nodeLHS );
         expressionPruning( nodeRHS );
@@ -230,17 +262,42 @@ void report::expressionPruning(std::unique_ptr<ExprTree>& node)
         node->rhs = std::move(nodeRHS);
         node->binary = true;
         node->op = binExpr->getOpcodeStr().str();
+        
+        node->sideEffects = node->lhs->sideEffects || node->rhs->sideEffects;
+        node->removable = !node->sideEffects && node->evaluated;
     }
     else if ( unExpr != nullptr ) {
         Expr const * sub = unExpr->getSubExpr();
 
         std::unique_ptr<ExprTree> nodeSub( new ExprTree(nullptr, nullptr, false, sub) );
+
+        nodeSub->sideEffects = node->sideEffects;
+
         expressionPruning( nodeSub );
         
         node->lhs = std::move(nodeSub);
         node->binary = false;
         node->op = UnaryOperator::getOpcodeStr(unExpr->getOpcode()).str();
+
+        node->sideEffects = node->lhs->sideEffects;
+        node->removable = !node->sideEffects && node->evaluated;
     }
+    else if ( call != nullptr ) {
+        FunctionDecl const * f = llvm::dyn_cast<FunctionDecl>( call->getCalleeDecl() );
+        //call->dump();
+
+        if ( f != nullptr ) {
+            bool sideEffects = sideEffectAnalysis(f);
+            if ( sideEffects == true ) {
+                std::cout << "Unable to remove function: " << call->getDirectCallee()->getNameAsString() << std::endl;
+            }
+            node->sideEffects = sideEffects;
+        }
+    }
+    else if ( boolLiteral != nullptr ) {
+        node->sideEffects = false;
+    }
+
 }
 
 
@@ -296,7 +353,7 @@ void report::matchIf(BoundNodes const & nodes)
     clang::IfStmt const * ifStmt = nodes.getNodeAs<clang::IfStmt>("ifstmt");
 
     auto i = std::find(bregLocations.begin(), bregLocations.end(), ifStmt->getLocStart().getRawEncoding());
-    
+
     if ( i == bregLocations.end() ) {
         return;
     }
@@ -314,7 +371,28 @@ void report::matchIf(BoundNodes const & nodes)
     bool expressionValue = true;
     bool evaluated = ifStmt->getCond()->EvaluateAsBooleanCondition(expressionValue, *d_analyser.context());
 
-    if ( evaluated ) { // if stmt can change immediately, either the body can go or the condition can go
+    bool hasPossibleSideEffects = ifStmt->getCond()->HasSideEffects( *a.context() );
+
+    bool modifyIf = false;
+
+    if ( evaluated && !hasPossibleSideEffects ) {
+        modifyIf = true;
+    }
+    else {
+        std::unique_ptr<ExprTree> node( new ExprTree(nullptr, nullptr, false, ifStmt->getCond()) );
+
+        expressionPruning( node );
+
+        if ( node->removable == true ) {
+            modifyIf = true;
+        }
+        else { // if stmt cannot be altered, branches of condition expression may be removed though 
+            rebuildCondition( node );
+        }
+    }
+
+
+    if ( modifyIf ) { // if stmt can change immediately, either the body can go or the condition can go
 
         Stmt const * elseStmt = ifStmt->getElse();
 
@@ -368,12 +446,6 @@ void report::matchIf(BoundNodes const & nodes)
         unsigned length = rangeToBeReplaced.getEnd().getRawEncoding() - rangeToBeReplaced.getBegin().getRawEncoding();
         Replacement replace = Replacement( a.manager(), rangeToBeReplaced.getBegin(), length, replacement );
         replace.apply( a.rewriter() );
-    }
-    else { // if stmt cannot be altered, branches of condition expression may be removed though 
-        std::unique_ptr<ExprTree> node( new ExprTree(nullptr, nullptr, false, ifStmt->getCond()) );
-
-        expressionPruning( node );
-        rebuildCondition( node );
     }
 }
 

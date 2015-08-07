@@ -17,6 +17,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <map>
 
 
 using namespace csabase;
@@ -36,11 +37,15 @@ namespace {
     struct report : Report<data>
     {
         std::vector<std::pair<std::string, boolValue>> bregs;
-        std::vector<unsigned> bregLocations;
+        std::vector<std::pair<unsigned, Stmt const *>> bregLocations;
+        std::vector<VarDecl const *> varDeclsRemoved;
+        std::map<DeclRefExpr const *, Expr const *> varValue;
 
         int offset;
 
         report(Analyser& analyser, PPObserver::CallbackType type = PPObserver::e_None);
+
+        void replaceExpr(Expr const * expr, SourceLocation exprStart, std::string replacement, IfStmt const * ifStmt);
 
         void matchBreg(BoundNodes const & nodes);
 
@@ -63,8 +68,14 @@ namespace {
     static const internal::DynTypedMatcher& dyn_matchBreg()
     {
         static const internal::DynTypedMatcher& matcher = findAll( functionDecl( hasDescendant( 
-                                                             stmt ( findAll (                                                                                                                                                       ifStmt( hasCondition( expr( findAll( 
-                                                                    callExpr().bind("call"))))).bind("ifstmt") )))));
+                                                             stmt( findAll( stmt(
+                                                                 eachOf(                                                                                                                                                               ifStmt( hasCondition( expr( findAll( 
+                                                                         callExpr().bind("call"))))).bind("ifstmt"),
+                                                                     ifStmt( hasCondition( expr( findAll( 
+                                                                         declRefExpr().bind("var"))))).bind("ifstmt"),
+                                                                     binaryOperator( hasOperatorName("=")).bind("=")
+                                                                         )))))).bind("func") );
+                                                                         
         return matcher; 
     }
 
@@ -80,7 +91,7 @@ namespace {
         bregFile.open(".bregLocs");
 
         for (auto i : bregLocations) {
-            bregFile << i << "\n";
+            bregFile << i.first << "\n";
         }
 
         bregFile.close();
@@ -97,11 +108,76 @@ namespace {
         return pair.second;
     } 
 
+    
+    void report::replaceExpr(Expr const * expr, SourceLocation exprStart, std::string replacement, IfStmt const * ifStmt) 
+    {
+        SourceLocation end = m.getFileLoc(Lexer::getLocForEndOfToken( expr->getLocEnd(), 0, m, a.context()->getLangOpts()));
+        auto exprRange = SourceRange(exprStart, end);
+
+        a.ReplaceText(exprRange, replacement);
+
+        auto foundIfStmt = std::find_if(bregLocations.begin(), bregLocations.end(), [=] (std::pair<unsigned, Stmt const *> p) 
+                                                                                        { 
+                                                                                            return p.second == ifStmt; 
+                                                                                        } 
+                                       );
+
+        if ( foundIfStmt == bregLocations.end() ) {
+            std::pair<unsigned, Stmt const *> p; 
+            p.first = ifStmt->getLocStart().getRawEncoding() - offset; 
+            p.second = ifStmt;
+            bregLocations.push_back( p );
+        }
+        
+        offset += ( exprRange.getEnd().getRawEncoding() - exprRange.getBegin().getRawEncoding() ) - replacement.size();
+    }
+
 
     void report::matchBreg(BoundNodes const & nodes)
     {
-        clang::CallExpr const * call = nodes.getNodeAs<clang::CallExpr>("call");
-        clang::IfStmt const * ifStmt = nodes.getNodeAs<clang::IfStmt>("ifstmt");
+        FunctionDecl const * func = nodes.getNodeAs<FunctionDecl>("func");
+        DeclRefExpr const * var = nodes.getNodeAs<DeclRefExpr>("var");
+        CallExpr const * call = nodes.getNodeAs<CallExpr>("call");
+        IfStmt const * ifStmt = nodes.getNodeAs<IfStmt>("ifstmt");
+        BinaryOperator const * assign = nodes.getNodeAs<BinaryOperator>("=");
+
+        if ( assign != nullptr ) {
+            DeclRefExpr const * varAssign = llvm::dyn_cast<DeclRefExpr>( assign->getLHS() );
+            varValue[varAssign] = assign->getRHS();
+        }
+
+        VarDecl const * varDecl;
+
+        //func->dump(); 
+       
+        if ( var != nullptr ) {
+            auto foundVar = varValue.find(var);
+            if (foundVar != varValue.end()) {
+                std::cout << "found" << std::endl;
+            }
+
+
+            if ( var->getDecl() != nullptr ) {
+                varDecl = llvm::dyn_cast<VarDecl>( var->getDecl() );
+
+                if ( varDecl != nullptr ) {
+                    if ( varDecl->hasInit() ) {
+
+                        Expr const * init = varDecl->getInit();
+
+                        CallExpr const * callInit = llvm::dyn_cast<CallExpr>( init );
+
+                        if ( callInit != nullptr ) {
+                            call = callInit;
+                        }
+                    }
+                }
+            }
+        }
+
+        if ( call == nullptr ) {
+            return;
+        }
 
         if ( a.manager().isMacroBodyExpansion( call->getLocStart() ) ) {
             auto r = a.manager().getExpansionRange( call->getLocStart() );
@@ -112,16 +188,28 @@ namespace {
             for (auto e : bregs) {
                 if ( call->getDirectCallee() != NULL ) {
                     if ( bregName == (e.first+"__value") ) {
-                        SourceLocation end = m.getFileLoc(Lexer::getLocForEndOfToken( call->getLocEnd(), 0, m, a.context()->getLangOpts()));
-                        auto callRange = SourceRange(call->getLocStart(), end);
-
                         std::string replacement = getBregValue(e) ? "true" : "false";
 
-                        a.ReplaceText(callRange, replacement);
-                        bregLocations.push_back( ifStmt->getLocStart().getRawEncoding() - offset );
+                        if ( var != nullptr ) {
 
-                        //offset of if stmt before and after replacing breg calls 
-                        offset += ( callRange.getEnd().getRawEncoding() - expansionRange.getBegin().getRawEncoding() ) - replacement.size();
+                            //remove var assign
+                            auto foundVarDecl = std::find(varDeclsRemoved.begin(), varDeclsRemoved.end(), varDecl);
+    
+                            if ( foundVarDecl == varDeclsRemoved.end() ) {
+                                SourceLocation end = m.getFileLoc(Lexer::getLocForEndOfToken( varDecl->getLocEnd(), 0, m, a.context()->getLangOpts()));
+                                auto varDeclRange = SourceRange(varDecl->getLocStart(), end.getLocWithOffset(1));
+                                //a.ReplaceText(varDeclRange, "");
+
+                                //offset += ( varDeclRange.getEnd().getRawEncoding() - varDeclRange.getBegin().getRawEncoding() );
+
+                                varDeclsRemoved.push_back(varDecl);
+                            }
+                            
+                            replaceExpr(var, var->getLocStart(), replacement, ifStmt);
+                        }
+                        else {
+                            replaceExpr(call, expansionRange.getBegin(), replacement, ifStmt);
+                        }
                     }
                 }
             }
