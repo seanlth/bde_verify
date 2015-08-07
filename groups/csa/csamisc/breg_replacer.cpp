@@ -39,7 +39,7 @@ namespace {
         std::vector<std::pair<std::string, boolValue>> bregs;
         std::vector<std::pair<unsigned, Stmt const *>> bregLocations;
         std::vector<VarDecl const *> varDeclsRemoved;
-        std::map<DeclRefExpr const *, Expr const *> varValue;
+        std::map<VarDecl const *, Expr const *> varValue;
 
         int offset;
 
@@ -140,10 +140,14 @@ namespace {
         CallExpr const * call = nodes.getNodeAs<CallExpr>("call");
         IfStmt const * ifStmt = nodes.getNodeAs<IfStmt>("ifstmt");
         BinaryOperator const * assign = nodes.getNodeAs<BinaryOperator>("=");
-
+            
+        std::cout << "here agin" << std::endl;
         if ( assign != nullptr ) {
             DeclRefExpr const * varAssign = llvm::dyn_cast<DeclRefExpr>( assign->getLHS() );
-            varValue[varAssign] = assign->getRHS();
+            VarDecl const * varDeclAssign = llvm::dyn_cast<VarDecl>( varAssign->getDecl() );
+
+            varValue[varDeclAssign] = assign->getRHS();
+            std::cout << "assign" << std::endl;
         }
 
         VarDecl const * varDecl;
@@ -151,19 +155,25 @@ namespace {
         //func->dump(); 
        
         if ( var != nullptr ) {
-            auto foundVar = varValue.find(var);
-            if (foundVar != varValue.end()) {
-                std::cout << "found" << std::endl;
-            }
-
-
             if ( var->getDecl() != nullptr ) {
                 varDecl = llvm::dyn_cast<VarDecl>( var->getDecl() );
+                auto foundVar = varValue.find(varDecl);
+                std::cout << "looking" << std::endl;
 
-                if ( varDecl != nullptr ) {
+                if ( foundVar != varValue.end() ) {
+                    std::cout << "found" << std::endl;
+                    CallExpr const * callInit = llvm::dyn_cast<CallExpr>( foundVar->second );
+
+                    if ( callInit != nullptr ) {
+                        call = callInit;
+                    }
+                } 
+                else if ( varDecl != nullptr ) {
+                    std::cout << "here" << std::endl;
                     if ( varDecl->hasInit() ) {
-
+                        std::cout << "def" << std::endl;
                         Expr const * init = varDecl->getInit();
+                        varValue[varDecl] = init;
 
                         CallExpr const * callInit = llvm::dyn_cast<CallExpr>( init );
 

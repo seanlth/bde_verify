@@ -21,8 +21,18 @@ void f()
 {
     bool i = bbit_send_to_omx__value();
     
+    if (i) {
+        int one = 0;
+    }
+
+    i = bregF__value();
+
+    if (i) {
+        int two = 0;
+    }
 
 
+/*
     if (i) {
         int asd = 0;
     }
@@ -182,5 +192,5 @@ void f()
     //    v1 = 1;
     //}
 
-
+*/
 }
