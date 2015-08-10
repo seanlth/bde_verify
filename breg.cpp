@@ -30,6 +30,12 @@ void f()
     if (i) {
         int two = 0;
     }
+    
+    i = bregT__value();
+
+    if ( i ) {
+
+    }
 
 
 /*
