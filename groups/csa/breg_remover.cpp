@@ -455,12 +455,6 @@ void report::matchIf(BoundNodes const & nodes)
             }
         }
         
-        //rangeToBeReplaced.getBegin().dump(a.manager());
-        //std::cout << ": ";
-        //std::cout << "replacing: " << a.get_source(rangeToBeReplaced).str();
-        //std::cout << " with: " << replacement << std::endl;
-
-
         unsigned length = rangeToBeReplaced.getEnd().getRawEncoding() - rangeToBeReplaced.getBegin().getRawEncoding();
         Replacement replace = Replacement( a.manager(), rangeToBeReplaced.getBegin(), length, replacement );
         replace.apply( a.rewriter() );
