@@ -6,7 +6,6 @@
 #define bregF__value() g()
 
 
-
 bool q() {
     return true;
 }
@@ -17,8 +16,24 @@ bool g() {
 
 void call() {}
 
+
+void newFunction() {
+    int i = 0;
+}
+
+void oldFunction() {
+    if ( bregT__value() || q() ) {
+        newFunction();
+        return;
+    }
+    //else 
+    int i = 0;
+}
+
+
 void f() 
 {
+
     bool i = bbit_send_to_omx__value();
     
     if (i) {

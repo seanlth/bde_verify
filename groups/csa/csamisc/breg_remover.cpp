@@ -20,6 +20,7 @@
 #include "breg_replacer.h"
 
 #define log(s) (std::cout << s << std::endl )
+#define maybe(check) if (check == nullptr) {return;} 
 
 using namespace csabase;
 using namespace clang;
@@ -150,12 +151,12 @@ void report::operator()()
 }
 
 void report::addChainedElses(Stmt const * stmt) {
-    if (stmt == NULL) {
+    if (stmt == nullptr) {
         return;
     }
     IfStmt const * ifStmt = llvm::dyn_cast<IfStmt>(stmt);
 
-    if (ifStmt != NULL) {
+    if (ifStmt != nullptr) {
         elsesRemoved.push_back(ifStmt);
         addChainedElses(ifStmt->getElse());
     }
@@ -168,7 +169,7 @@ bool report::hasVarDecls(CompoundStmt const * stmt)
     for (bdy_iter iter = (bdy_iter)stmt->body_begin(); iter != (bdy_iter)stmt->body_end(); iter++) {
         Stmt const * s = *iter;
         clang::DeclStmt const * varDeclStmt = llvm::dyn_cast<clang::DeclStmt>(s);
-        if (varDeclStmt != NULL) {
+        if (varDeclStmt != nullptr) {
             return true;
         }
     }
@@ -291,7 +292,11 @@ void report::expressionPruning(std::unique_ptr<ExprTree>& node)
             if ( sideEffects == true ) {
                 std::cout << "Unable to remove function: " << call->getDirectCallee()->getNameAsString() << std::endl;
             }
-            node->sideEffects = sideEffects;
+            else {
+                node->sideEffects = sideEffects;
+
+                std::cout << "removing call to " << call->getDirectCallee()->getNameAsString() << std::endl;
+            }
         }
     }
     else if ( boolLiteral != nullptr ) {
@@ -350,7 +355,8 @@ std::string report::getExprString(Expr const * expr)
 
 void report::matchIf(BoundNodes const & nodes)
 {
-    clang::IfStmt const * ifStmt = nodes.getNodeAs<clang::IfStmt>("ifstmt");
+    FunctionDecl const * func = nodes.getNodeAs<FunctionDecl>("func");
+    IfStmt const * ifStmt = nodes.getNodeAs<IfStmt>("ifstmt");
 
     auto i = std::find(bregLocations.begin(), bregLocations.end(), ifStmt->getLocStart().getRawEncoding());
 
@@ -403,30 +409,42 @@ void report::matchIf(BoundNodes const & nodes)
 
             CompoundStmt const * body = static_cast<CompoundStmt const*>( ifStmt->getThen() );
             bool hasVars = hasVarDecls( body ); // does the if body has var decls 
+           
+            if (body->body_back() != nullptr) {
+                ReturnStmt const * ret = llvm::dyn_cast<ReturnStmt>( body->body_back() );
             
-            if ( hasVars ) { // braces must remain 
-                SourceRange replacementRange = SourceRange(body->getLBracLoc(), body->getRBracLoc().getLocWithOffset(1));
-                replacement = a.get_source(replacementRange, true).str();
-            }
-            else { // braces can be removed 
-                unsigned columnNumber = a.manager().getPresumedColumnNumber(ifStmt->getLocStart());
-                replacement = getStmtBodyReplacement(body, columnNumber);
+                if ( ret != nullptr ) {
+                    CompoundStmt const * funcBody = llvm::dyn_cast<CompoundStmt>( func->getBody() );
+                    if ( funcBody != nullptr ) {
+                        rangeToBeReplaced = SourceRange(ifStmt->getLocStart(), funcBody->getLocEnd());
+                        unsigned columnNumber = a.manager().getPresumedColumnNumber(ifStmt->getLocStart());
+                        replacement = getStmtBodyReplacement(body, columnNumber);
+                    }
+                }
+                else if ( hasVars ) { // braces must remain 
+                    SourceRange replacementRange = SourceRange(body->getLBracLoc(), body->getRBracLoc().getLocWithOffset(1));
+                    replacement = a.get_source(replacementRange, true).str();
+                }
+                else { // braces can be removed 
+                    unsigned columnNumber = a.manager().getPresumedColumnNumber(ifStmt->getLocStart());
+                    replacement = getStmtBodyReplacement(body, columnNumber);
+                }
             }
 
-            if ( elseStmt != NULL ) { 
+            if ( elseStmt != nullptr ) { 
                 addChainedElses( elseStmt ); //store else statements removed 
             }   
         }
         else { //removes the if stmt, leaves the else parts if there are any
             
-            if ( elseStmt != NULL ) {
+            if ( elseStmt != nullptr ) {
                 
                 SourceRange elseRange = SourceRange(elseStmt->getLocStart().getLocWithOffset(0), ifStmt->getLocEnd().getLocWithOffset(1));
                 replacement = a.get_source(elseRange, true).str();
 
                 CompoundStmt const * elseBody = llvm::dyn_cast<CompoundStmt>( elseStmt );
 
-                if (elseBody != NULL) {
+                if (elseBody != nullptr) {
                     bool hasVars = hasVarDecls( elseBody ); 
                     
                     if ( !hasVars ) {
@@ -437,10 +455,10 @@ void report::matchIf(BoundNodes const & nodes)
             }
         }
         
-        rangeToBeReplaced.getBegin().dump(a.manager());
-        std::cout << ": ";
-        std::cout << "replacing: " << a.get_source(rangeToBeReplaced).str();
-        std::cout << " with: " << replacement << std::endl;
+        //rangeToBeReplaced.getBegin().dump(a.manager());
+        //std::cout << ": ";
+        //std::cout << "replacing: " << a.get_source(rangeToBeReplaced).str();
+        //std::cout << " with: " << replacement << std::endl;
 
 
         unsigned length = rangeToBeReplaced.getEnd().getRawEncoding() - rangeToBeReplaced.getBegin().getRawEncoding();
