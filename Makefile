@@ -10,11 +10,6 @@ GCCVERSION  = 4.9.2
 GCCDIR      = /opt/swt/install/gcc-$(GCCVERSION)
 CXX         = $(GCCDIR)/bin/g++
 
-# ifeq ($(notdir $(CXX)),g++)
-# GCCDIR     ?= $(patsubst %/bin/g++,%,$(shell which $(CXX)))
-# else
-# GCCDIR     ?= $(patsubst %/bin/g++,%,$(shell which g++))
-# endif
 
 TARGET      = bde_verify_bin
 CSABASE     = csabase
@@ -161,24 +156,6 @@ $(OBJ)/%.o: %.cpp
 	@echo compiling $(@:$(OBJ)/%.o=%.cpp)
 	$(VERBOSE) $(CXX) $(INCFLAGS) $(DEFFLAGS) $(CXXFLAGS) $(WARNFLAGS) \
                           -o $@ -c $(@:$(OBJ)/%.o=%.cpp)
-
-.PHONY: install install-bin install-dev
-
-install: install-bin install-dev
-
-install-bin: $(OBJ)/$(TARGET)
-	$(VERBOSE) $(MAKE) -C $(CSABASEDIR) install-bin
-	mkdir -p $(DESTDIR)/libexec/bde-verify
-	cp $(OBJ)/$(TARGET) $(DESTDIR)/libexec/bde-verify
-	mkdir -p $(DESTDIR)/bin
-	cp scripts/bde_verify scripts/bb_cppverify scripts/check_bos $(DESTDIR)/bin
-	mkdir -p $(DESTDIR)/etc/bde-verify
-	cp bde_verify.cfg bb_cppverify.cfg $(DESTDIR)/etc/bde-verify
-
-install-dev:
-	$(VERBOSE) $(MAKE) -C $(CSABASEDIR) install-dev
-	# cp groups/csa/csadep/csadep_*.h $(DESTDIR)/include/bde-verify
-
 .PHONY: clean
 
 clean:

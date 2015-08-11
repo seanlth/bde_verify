@@ -135,7 +135,6 @@ namespace {
 
     void report::matchBreg(BoundNodes const & nodes)
     {
-        FunctionDecl const * func = nodes.getNodeAs<FunctionDecl>("func");
         DeclRefExpr const * var = nodes.getNodeAs<DeclRefExpr>("var");
         CallExpr const * call = nodes.getNodeAs<CallExpr>("call");
         IfStmt const * ifStmt = nodes.getNodeAs<IfStmt>("ifstmt");
@@ -195,20 +194,6 @@ namespace {
                         std::string replacement = getBregValue(e) ? "true" : "false";
 
                         if ( var != nullptr ) {
-
-                            //remove var assign
-                            auto foundVarDecl = std::find(varDeclsRemoved.begin(), varDeclsRemoved.end(), varDecl);
-    
-                            if ( foundVarDecl == varDeclsRemoved.end() ) {
-                                SourceLocation end = m.getFileLoc(Lexer::getLocForEndOfToken( varDecl->getLocEnd(), 0, m, a.context()->getLangOpts()));
-                                auto varDeclRange = SourceRange(varDecl->getLocStart(), end.getLocWithOffset(1));
-                                //a.ReplaceText(varDeclRange, "");
-
-                                //offset += ( varDeclRange.getEnd().getRawEncoding() - varDeclRange.getBegin().getRawEncoding() );
-
-                                varDeclsRemoved.push_back(varDecl);
-                            }
-                            
                             replaceExpr(var, var->getLocStart(), replacement, ifStmt);
                         }
                         else {
