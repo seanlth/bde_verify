@@ -6,6 +6,16 @@
 #define bregF__value() g()
 
 
+class str {
+public:
+    int x;
+    int * p;
+
+    void inc() {x++;}
+    str() {x = 0;}
+};
+
+
 bool q() {
     return true;
 }
@@ -16,11 +26,11 @@ bool g() {
 
 void call() {}
 
-
 void newFunction() {
     int i = 0;
 }
 
+//test early return;
 void oldFunction() {
     if ( bregT__value() || q() ) {
         newFunction();
@@ -30,53 +40,73 @@ void oldFunction() {
     int i = 0;
 }
 
+int global;
+
+bool sideEffectFunction() {
+    global++;
+    return true;
+}
+
+bool referenceFunction() {
+    const int& copy = global;
+    
+
+    return true;
+}
+
+bool pointerFunction() {
+    int const * copy = &(*(int*)(&global));
+    int * asd = &global;
+
+    return true;
+}
+
+
+bool methodFunction() {
+    str s = str();
+    s.inc();
+    return true;
+}
+
+bool twoCallFunction() {
+    int x = 0;
+    x++;
+    referenceFunction();
+    return false;
+}
+
+bool longFunction() {
+    int i = 0;
+    ;;;;;;;;;;;;;;;;
+    return false;
+}
+
+bool argFunction(int & x) {
+    x++;
+    return true;
+}
+
+bool structFunction(str s) {
+    (*s.p)++;
+
+    return true;
+}
+
+bool refFunction() {
+    str local = str();
+    local.p = &global;
+
+
+}
 
 void f() 
-{
-
-    bool i = bbit_send_to_omx__value();
-    
-    if (i) {
-        int one = 0;
-    }
-
-    i = bregF__value();
-
-    if (i) {
-        int two = 0;
-    }
-    
-    i = bregT__value();
-
-    if ( i ) {
-
-    }
-
-
-/*
-    if (i) {
-        int asd = 0;
-    }
-    else {
-        int asd2 = 0;
-    }
-
-    if (i == false) {
-        int a = 0;
-    }
-
-    
-
-
-
- 
+{ 
     if (bbit_send_to_omx__value() && q()) {
         int i = 0;
     }
     
     if ( bregT__value() ) {int i = 0;}
     
-
 
     // test for leaving braces behind
     if ( bregT__value() ) {
@@ -119,7 +149,7 @@ void f()
         int leave_this;
     }
    
-    //test leaving braces behind, constant expression
+    //no breg call, no change
     if ( !(true == false) || q() ) {
         int var = 1; 
     }
@@ -163,6 +193,7 @@ void f()
         int asd;
     }
 
+    //remove breg call deep in condition
     if (bool( (  ( (c1 == true && c2 == true) || c3) || ( bregF__value() == true ) ) || (v1 == 'c') )) {
         int asd;
     }
@@ -177,41 +208,91 @@ void f()
 
     }
 
-    if ( q() ) {
+    //no change no breg call
+    if (true) {}
 
-    }
-    
-
-    if ( bregT__value() ) { 
-
-
-    }
-
-    if ( bregF__value() ) {
-        
-    }
-
+    //no change no breg call
     if (true && q()) {
 
     }
 
-    if (true) {}
+    bool i = bbit_send_to_omx__value();
+    
+    //var with breg value
+    if (i) {
+        int one = 0;
+    }
 
-    if ( bregT__value() ) {  }
+    //var with breg value, value change
+    i = bregF__value();
 
+    if (i) {
+        int two = 0;
+    }
+    
+    //value change
+    i = bregT__value();
 
-//    if ( !(bregT__value() == false) || q() ) {
-//        int var = 1; 
-//    }
+    if ( i ) {
+
+    }
+
+    //var with breg value
+    if (i) {
+        int asd = 0;
+    }
+    else {
+        int asd2 = 0;
+    }
+
+    //var with breg value
+    if (i == false) {
+        int a = 0;
+    }
+
+    //function that isn't removed
+    if ( bregF__value() && longFunction() ) {
+        ;
+    }
+
+    //function has side effects
+    if ( bregF__value() && sideEffectFunction() ) {
+        ;
+    }
+
+    //function has side effects
+    if ( bregF__value() && methodFunction() ) {
+        ;
+    }
+
+    //function with pointer side effects
+    if ( bregF__value() && pointerFunction() ) {
+        ;
+    }
+
+    //function with reference side effects
+    if ( bregF__value() && referenceFunction() ) {
+        ;
+    }
+
+    //function with reference side effects
+    if ( bregF__value() && twoCallFunction() ) {
+        ;
+    }
+    
+    //function with reference side effects
+    int x = 0;
+    if ( bregF__value() && argFunction(x) ) {
+        ;
+    }
+
+    //function with reference side effects
+    str s;
+    s.p = &x;
+    if ( bregF__value() && structFunction(s) ) {
+        ;
+    }
 
     
 
-    //std::string asd;
-    //int v1 = 0;
-
-    //if ( ( asd == "something" || asd == "something else" ) && bregF__value() ) {
-    //    v1 = 1;
-    //}
-
-*/
 }

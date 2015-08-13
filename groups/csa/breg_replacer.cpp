@@ -69,7 +69,8 @@ namespace {
     {
         static const internal::DynTypedMatcher& matcher = findAll( functionDecl( hasDescendant( 
                                                              stmt( findAll( stmt(
-                                                                 eachOf(                                                                                                                                                               ifStmt( hasCondition( expr( findAll( 
+                                                                 eachOf(
+                                                                     ifStmt( hasCondition( expr( findAll( 
                                                                          callExpr().bind("call"))))).bind("ifstmt"),
                                                                      ifStmt( hasCondition( expr( findAll( 
                                                                          declRefExpr().bind("var"))))).bind("ifstmt"),
