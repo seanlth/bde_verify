@@ -61,10 +61,10 @@ bool pointerFunction() {
     return true;
 }
 
-
+str s = str();
 bool methodFunction() {
-    str s = str();
-    s.inc();
+    s.x++;
+    //s.inc();
     return true;
 }
 
@@ -93,11 +93,28 @@ bool structFunction(str s) {
 }
 
 bool refFunction() {
+    //int * x;
+    //x = &global;
     str local = str();
     local.p = &global;
 
-
+    return true;
 }
+
+//x = (anything) where x points to const or x is non pointer
+//int const * x = (anything) 
+
+//int * x = &global 
+//int * x = x.call() //int* x.call() if x is global 
+//int * x = s.x; //if s is global 
+//int * x = call() // int* call 
+//
+//int x = (anything)
+//
+//s.x = &global
+//x = &global
+//
+//stmt ( declStmt( ptrVarDecl ( hasInitialiser() ) ) )
 
 void f() 
 { 
@@ -293,6 +310,9 @@ void f()
         ;
     }
 
+    if ( bregF__value() && refFunction() ) {
+        ;
+    }
     
 
 }

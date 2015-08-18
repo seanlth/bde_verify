@@ -65,9 +65,9 @@ namespace {
     
 
     //matches string initialization as a variable or in an initialization list
-    static const internal::DynTypedMatcher& dyn_matchBreg()
+    static const internal::DynTypedMatcher dyn_matchBreg()
     {
-        static const internal::DynTypedMatcher& matcher = findAll( functionDecl( hasDescendant( 
+        static const internal::DynTypedMatcher matcher = findAll( functionDecl( hasDescendant( 
                                                              stmt( findAll( stmt(
                                                                  eachOf(
                                                                      ifStmt( hasCondition( expr( findAll( 

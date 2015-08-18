@@ -1,4 +1,5 @@
 #include "ExprTree.h"
+#include "breg_matchers.h"
 
 #include <clang/ASTMatchers/ASTMatchers.h>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
@@ -16,6 +17,7 @@
 #include <csabase_util.h>
 #include <csabase_visitor.h>
 
+
 using namespace csabase;
 using namespace clang;
 using namespace clang::ast_matchers;
@@ -31,13 +33,15 @@ ExprTree::ExprTree() :
     removable(false),
     evaluated(false),
     sideEffects(false),
-    binary(false)
+    binary(false),
+    ignoreSideEffects(false)
 {
 }
 
 
-ExprTree::ExprTree(std::unique_ptr<ExprTree> lhs, std::unique_ptr<ExprTree> rhs, bool removable, Expr const * clangNode,
-                                                                                                 ASTContext const * context, 
+ExprTree::ExprTree(std::unique_ptr<ExprTree> lhs, std::unique_ptr<ExprTree> rhs, bool removable, bool ignoreSideEffects, 
+                                                                                                 Expr const * clangNode,
+                                                                                                 ASTContext * context, 
                                                                                                  SourceManager const * manager) :
     context(context),
     manager(manager),
@@ -48,7 +52,8 @@ ExprTree::ExprTree(std::unique_ptr<ExprTree> lhs, std::unique_ptr<ExprTree> rhs,
     removable(removable),
     evaluated(false),
     sideEffects(false),
-    binary(false)
+    binary(false),
+    ignoreSideEffects(ignoreSideEffects)
 {
 }
 
@@ -85,8 +90,8 @@ void ExprTree::pruneTree()
         Expr const * lhs = binExpr->getLHS();
         Expr const * rhs = binExpr->getRHS();
         
-        std::unique_ptr<ExprTree> nodeLHS( new ExprTree(nullptr, nullptr, false, lhs, context, manager) );
-        std::unique_ptr<ExprTree> nodeRHS( new ExprTree(nullptr, nullptr, false, rhs, context, manager) );
+        std::unique_ptr<ExprTree> nodeLHS( new ExprTree(nullptr, nullptr, false, this->ignoreSideEffects, lhs, context, manager) );
+        std::unique_ptr<ExprTree> nodeRHS( new ExprTree(nullptr, nullptr, false, this->ignoreSideEffects, rhs, context, manager) );
         
         nodeLHS->sideEffects = this->sideEffects;
         nodeRHS->sideEffects = this->sideEffects;
@@ -105,7 +110,7 @@ void ExprTree::pruneTree()
     else if ( unExpr != nullptr ) {
         Expr const * sub = unExpr->getSubExpr();
 
-        std::unique_ptr<ExprTree> nodeSub( new ExprTree(nullptr, nullptr, false, sub, context, manager) );
+        std::unique_ptr<ExprTree> nodeSub( new ExprTree(nullptr, nullptr, false, this->ignoreSideEffects, sub, context, manager) );
 
         nodeSub->sideEffects = this->sideEffects;
 
@@ -122,17 +127,23 @@ void ExprTree::pruneTree()
         FunctionDecl const * f = llvm::dyn_cast<FunctionDecl>( call->getCalleeDecl() );
 
         if ( f != nullptr ) {
-            std::pair<bool, std::string> sideEffects = sideEffectAnalysis(f);
-            this->sideEffects = sideEffects.first;
-            call->getLocStart().dump(*manager);
-            std::cout << ": ";
+            
+            if ( this->ignoreSideEffects == false ) {  
+                std::pair<bool, std::string> sideEffects = sideEffectAnalysis(f);
+                this->sideEffects = sideEffects.first;
+                call->getLocStart().dump(*manager);
+                std::cout << ": ";
 
-            if ( this->sideEffects == true ) {
-                std::cout << "unable to remove function: '" << call->getDirectCallee()->getNameAsString() << "'" << ", ";
-                std::cout << sideEffects.second << std::endl;
+                if ( this->sideEffects == true ) {
+                    std::cout << "unable to remove function: '" << call->getDirectCallee()->getNameAsString() << "'" << ", ";
+                    std::cout << sideEffects.second << std::endl;
+                }
+                else {
+                    std::cout << "removing call to '" << call->getDirectCallee()->getNameAsString() << "'" << std::endl;
+                } 
             }
             else {
-                std::cout << "removing call to '" << call->getDirectCallee()->getNameAsString() << "'" << std::endl;
+              std::cout << "removing call to '" << call->getDirectCallee()->getNameAsString() << "'" << std::endl;
             }
         }
     }
@@ -145,7 +156,7 @@ void ExprTree::pruneTree()
 
 std::pair<bool, std::string> ExprTree::sideEffectAnalysis(FunctionDecl const * f)
 {
-    /*
+    
     if ( f->hasBody() ) {
         CompoundStmt const * body = llvm::dyn_cast<CompoundStmt>( f->getBody() );
        
@@ -153,149 +164,61 @@ std::pair<bool, std::string> ExprTree::sideEffectAnalysis(FunctionDecl const * f
             return std::pair<bool, std::string>( true, "function is over 15 lines long" );
         } 
 
-        
-
-        typedef clang::CompoundStmt::body_iterator bdy_iter;
-        typedef clang::FunctionDecl::param_iterator param_iter;
-
-        for (param_iter iter = (param_iter)f->param_begin(); iter != (param_iter)f->param_end(); iter++) {
+        for (auto iter = f->param_begin(); iter != f->param_end(); iter++) {
             ParmVarDecl const * varDecl = *iter;
-            
-            QualType qualType = varDecl->getType();
-                   
-            if ( qualType.getTypePtr()->isPointerType() || qualType.getTypePtr()->isReferenceType() ) {
-                if ( !qualType.getTypePtr()->getPointeeType().isConstQualified() ) {
-                    return std::pair<bool, std::string>( true, "passing non-const pointer or reference" );
-                }
+
+            std::pair<Decl const *, bool> structure = Matchers::getNodeInExpr<Decl>( context, varDecl, Matchers::ptrFieldDeclMatcher );
+            std::pair<Decl const *, bool> ptrRef = Matchers::getNodeInExpr<Decl>( context, varDecl, valueDecl( hasType( isNonConstPtr())) );
+
+            if ( structure.second == true ) {
+                 return std::pair<bool, std::string>( true, "passing non-const pointer or reference in class or struct" );
+            }
+            else if ( ptrRef.second == true ) {
+                return std::pair<bool, std::string>( true, "passing non-const pointer or reference" );
             }
         }
 
    
-        for (bdy_iter iter = (bdy_iter)body->body_begin(); iter != (bdy_iter)body->body_end(); iter++) {
+        for (auto iter = body->body_begin(); iter != body->body_end(); iter++) {
             Stmt const * s = *iter;
 
-            UnaryOperator const * un = getNodeInExpr<UnaryOperator>( s, stmt( hasDescendant( unaryOperator().bind("node") )) );
+            std::pair<Expr const *, bool> inc = Matchers::getNodeInExpr<Expr>( context, s, Matchers::incOrDecMatcher ); 
+            std::pair<Expr const *, bool> varDecl = Matchers::getNodeInExpr<Expr>( context, s, Matchers::varDeclMatcher ); 
+            std::pair<Expr const *, bool> assign = Matchers::getNodeInExpr<Expr>( context, s, Matchers::assignMatcher ); 
+            std::pair<Expr const *, bool> callExpr = Matchers::getNodeInExpr<Expr>( context, s, Matchers::callMatcher ); 
 
-            BinaryOperator const * assign = llvm::dyn_cast<BinaryOperator>( s );
-            CallExpr const * call = llvm::dyn_cast<CallExpr>( s );
-            DeclStmt const * declStmt = llvm::dyn_cast<DeclStmt>( s );
-
-            s->dump();
-            
-            if ( un != nullptr ) {
-                //un = getNodeInExpr<UnaryOperator>( s, stmt( hasDescendant( eachOf( unaryOperator(hasOperatorName("++")).bind("node"),
-                //                                                                   unaryOperator(hasOperatorName("--")).bind("node"))) ));
-                if (un != nullptr) {
-                    if ( un->isIncrementDecrementOp() ) {
-                        DeclRefExpr const * var = getNodeInExpr<DeclRefExpr>( un->getSubExpr(),  
-                                expr( hasDescendant( declRefExpr().bind("node") )) );
-                        MemberExpr const * member = getNodeInExpr<MemberExpr>( un->getSubExpr(),  
-                                expr( hasDescendant( memberExpr().bind("node") )) );
-
-                        if ( var != nullptr ) {
-                            VarDecl const * varDecl = llvm::dyn_cast<VarDecl>( var->getDecl() );
-                            if ( !varDecl->hasLocalStorage() ) {
-                                return std::pair<bool, std::string>( true, "incrementing or decrementing non-local variable" );
-                            }
-                        }
-                        else if ( member != nullptr ) {
-                            member->dump();
-                            member->getMemberDecl()->dump();
-                            FieldDecl const * fieldDecl = llvm::dyn_cast<FieldDecl>( member->getMemberDecl() );
-                            QualType qualType = member->getType();
-
-                            var = llvm::dyn_cast<DeclRefExpr>( member->getBase() );
-                            VarDecl const * varDecl = llvm::dyn_cast<VarDecl>( var->getDecl() );
-                            varDecl->dump();
-                            if ( !varDecl->hasLocalStorage() ) {
-                                return std::pair<bool, std::string>( true, "incrementing or decrementing non-local variable" );
-                            }  
-                            else if ( qualType.getTypePtr()->isPointerType() || qualType.getTypePtr()->isReferenceType() ) {
-                                if ( !qualType.getTypePtr()->getPointeeType().isConstQualified() ) {
-                                    //DeclRefExpr const * var = getDeclRefExpr( varDecl->getInit() );
-                                    if ( var != nullptr ) {
-                                        varDecl = llvm::dyn_cast<VarDecl>( var->getDecl() );
-                                        if (varDecl != nullptr) {
-                                            if ( !varDecl->hasLocalStorage() ) {
-                                                return std::pair<bool, std::string>( true, "incrementing or decrementing non-local variable" );
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+            if ( inc.second != false ) {
+                if ( inc.first != nullptr ) {
+                    return std::pair<bool, std::string>( true, "incrementing or decrementing instance variable" );
+                }
+                else {
+                    return std::pair<bool, std::string>( true, "incrementing or decrementing non-local variable" );
                 }
             }
-            else if ( assign != nullptr ) {
-                if ( assign->isAssignmentOp() || assign->isCompoundAssignmentOp() ) {
-                    DeclRefExpr const * var = llvm::dyn_cast<DeclRefExpr>( assign->getLHS() );
-                    MemberExpr const * member = llvm::dyn_cast<MemberExpr>( assign->getLHS() );
-
-                    if ( var != nullptr ) {
-                        VarDecl const * varDecl = llvm::dyn_cast<VarDecl>( var->getDecl() );
-                        if ( !varDecl->hasLocalStorage() ) {
-                            return std::pair<bool, std::string>( true, "assigning to non-local variable" );
-                        }
-                    }
-                    else if ( member != nullptr ) {
-
-                        var = llvm::dyn_cast<DeclRefExpr>( member->getBase() );
-                        VarDecl const * varDecl = llvm::dyn_cast<VarDecl>( var->getDecl() );
-                        if ( !varDecl->hasLocalStorage() ) {
-                            return std::pair<bool, std::string>( true, "assigning to non-local variable" );
-                        }   
-                        else {
-                            QualType qualType = member->getType();
-                   
-                            if ( qualType.getTypePtr()->isPointerType() || qualType.getTypePtr()->isReferenceType() ) {
-                                if ( !qualType.getTypePtr()->getPointeeType().isConstQualified() ) {
-                                    DeclRefExpr const * var = getDeclRefExpr( varDecl->getInit() );
-                                    if ( var != nullptr ) {
-                                        varDecl = llvm::dyn_cast<VarDecl>( var->getDecl() );
-                                        if (varDecl != nullptr) {
-                                            if ( !varDecl->hasLocalStorage() ) {
-                                                return std::pair<bool, std::string>( true, "assigning non-const pointer or reference to non-local variable" );
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                        }
-                    }
+            else if ( varDecl.second != false ) {
+                return std::pair<bool, std::string>( true, "declaring non-const pointer or reference to non-local variable" );
+            }
+            else if ( assign.second != false ) {
+                if ( assign.first != nullptr ) {
+                    return std::pair<bool, std::string>( true, "assigning to instance variable" );
+                }
+                else {
+                    return std::pair<bool, std::string>( true, "assigning to non-local variable" );
                 }
             }
-            else if ( declStmt != nullptr ) {
-                VarDecl const * varDecl = llvm::dyn_cast<VarDecl>( declStmt->getSingleDecl() );     
-                
-                if ( varDecl != nullptr ) {
-                    QualType qualType = varDecl->getType();
-                   
-                    if ( qualType.getTypePtr()->isPointerType() || qualType.getTypePtr()->isReferenceType() ) {
-                        if ( !qualType.getTypePtr()->getPointeeType().isConstQualified() ) {
-                            DeclRefExpr const * var = getNodeInExpr<DeclRefExpr>( varDecl->getInit(),  expr( hasDescendant( declRefExpr().bind("node") )) );
-                            if ( var != nullptr ) {
-                                varDecl = llvm::dyn_cast<VarDecl>( var->getDecl() );
-                                if (varDecl != nullptr) {
-                                    if ( !varDecl->hasLocalStorage() ) {
-                                        return std::pair<bool, std::string>( true, "declaring non-const pointer or reference to non-local variable" );
-                                    }
-                                }
-                            }
-                        }
+            else if ( callExpr.second != false ) {
+                if ( callExpr.first != nullptr ) {
+                    CallExpr const * c = llvm::dyn_cast<CallExpr>( callExpr.first );
+                    FunctionDecl const * func = llvm::dyn_cast<FunctionDecl>( c->getCalleeDecl() );
+                    if ( func != nullptr ) {
+                        return sideEffectAnalysis( func );
                     }
-                }
-            }
-            else if ( call != nullptr ) {
-                FunctionDecl const * func = llvm::dyn_cast<FunctionDecl>( call->getCalleeDecl() );
-                if ( func != nullptr ) {
-                    return sideEffectAnalysis( func );
                 }
             }
         }
     }
-*/
-    return std::pair<bool, std::string>( false, "" );
+
+    return std::pair<bool, std::string>(false, "");
 }
+
 

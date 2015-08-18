@@ -23,8 +23,8 @@ fi
 
 if [ ! -f $1\-rewritten\-rewritten ]
 then
-    rm $1\-rewritten
-    echo "breg removal error"
+    mv $1\-rewritten $1\-rewritten.cpp  
+
 else
     mv $1\-rewritten\-rewritten $1\-rewritten.cpp  
 fi
