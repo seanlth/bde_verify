@@ -14,8 +14,11 @@ CXX         = $(GCCDIR)/bin/g++
 TARGET      = bde_verify_bin
 CSABASE     = csabase
 LCB         = bde-verify
+LUL         = bde-verify-util
 LIBCSABASE  = lib$(LCB).a
+LIBCSAUTIL  = lib$(LUL).a
 CSABASEDIR  = groups/csa/csabase
+CSAUTILDIR  = groups/csa/csautil
 
 CXXFLAGS   += -m64 -std=c++11
 CXXFLAGS   += -Wall -Wno-unused-local-typedefs
@@ -57,7 +60,7 @@ OBJ        := $(SYSTEM)-$(notdir $(CXX))
 
 # Set up location of clang headers and libraries needed by bde_verify.
 INCFLAGS   += -I$(LLVMDIR)/include
-LDFLAGS    += -L$(LLVMDIR)/lib -L$(CSABASEDIR)/$(OBJ)
+LDFLAGS    += -L$(LLVMDIR)/lib -L$(CSABASEDIR)/$(OBJ) -L$(CSAUTILDIR)/$(OBJ)
 
 VERBOSE ?= @
 
@@ -71,12 +74,13 @@ CXXFILES =                                                                    \
 # -----------------------------------------------------------------------------
 
 DEFFLAGS += -D__STDC_LIMIT_MACROS -D__STDC_CONSTANT_MACROS
-INCFLAGS += -I. -I$(CSABASEDIR) -Igroups/csa/csadep
+INCFLAGS += -I. -I$(CSABASEDIR) -I$(CSAUTILDIR) -Igroups/csa/csadep
 CXXFLAGS += -g -fno-common -fno-strict-aliasing -fno-exceptions -fno-rtti
 
 OFILES = $(CXXFILES:%.cpp=$(OBJ)/%.o)
 
 LIBS     =    -l$(LCB)                                                        \
+			  -l$(LUL)                                                        \
               -lLLVMX86Info                                                   \
               -lLLVMSparcInfo                                                 \
               -lclangFrontendTool                                             \
@@ -143,11 +147,16 @@ LIBS     =    -l$(LCB)                                                        \
 default: $(OBJ)/$(TARGET)
 
 .PHONY: csabase
+.PHONY: csautil
 
 $(CSABASEDIR)/$(OBJ)/$(LIBCSABASE): csabase
 	$(VERBOSE) $(MAKE) -C $(CSABASEDIR)
 
-$(OBJ)/$(TARGET): $(CSABASEDIR)/$(OBJ)/$(LIBCSABASE) $(OFILES)
+$(CSAUTILDIR)/$(OBJ)/$(LIBCSAUTIL): csautil
+	$(VERBOSE) $(MAKE) -C $(CSAUTILDIR)
+
+
+$(OBJ)/$(TARGET): $(CSABASEDIR)/$(OBJ)/$(LIBCSABASE) $(CSAUTILDIR)/$(OBJ)/$(LIBCSAUTIL) $(OFILES)
 	@echo linking executable
 	$(VERBOSE) $(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@.$$ $(OFILES) $(LIBS)
 	mv $@.$$ $@
