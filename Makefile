@@ -69,7 +69,7 @@ VERBOSE ?= @
 CXXFILES =                                                                    \
 		groups/csa/breg_remover.cpp										      \
 		groups/csa/breg_replacer.cpp                                          \
-		groups/csa/ExprTree.cpp                                               \
+		groups/csa/expr_tree.cpp                                               \
 
 # -----------------------------------------------------------------------------
 
