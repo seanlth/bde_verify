@@ -1,0 +1,90 @@
+INCLIBS = -lmisutil -lbregapiutils -lfoninfoutil -lportback -lportutil -lapputil -lapputilcore -lacclib -lcsdbmanip -la_basfs -lnscrlib -lpwhoutil -lpwhosvcmsg -leqtyexchanges -lloadparmcmutil -lfxeurocore -lispaccpsc -lticusrapi -luseroverrides -llabeldbacc -lusrovrdbacc -lbap -lindexdb2manip -lmgp -lpout2svcmsg -ltimezoneutil -lbbglib -lbregacclib -lbregrapidacc -lclassroute -lhistdefutil -lisyscomdb2dbacc -lmiscmdbacc -lrapidperm -lwrktksvcmsg -la_comdb2 -lbregdb -la_baslt -lbas -lbigparmcm -lbregutil -lcomdb2api -lroutecfgmgr -la_xmf -lbsc -lbsi -ldbutil -le_ipc -lbae -lbte -lpeutil -ltradsystypes -lbbmsgbufs -lbce -lisl -lparmsdata -lbbipc -lbde -lgdebuglog -liconv -lparmsbase -lbsl -lsysutil -lz -lmpt -lpvfdatadbacc -lz_bae -lprqsutil -lmsgutil -lprofilesvcpub -lusertrmldbacc -lprofileservicemsg -ltomscorecalcrt -llabeldbacc -ltmgrproto -lmdb -ldatelib -lz_a_datelib -la_datelib -lbbe -lbdaydb2cdrdb -ltspcomdb2dbacc -lbbhostutil -lftracelevels -lctrltmsgs -ladmancomm -lafmtbitaccessors -lafmtinternal -ltsfpsdbacc -ltsfirmdbacc -lbbcachecore -lnfpvprivs -lbbcesvcmsg -lafmtfmemchk -ltsrtadmin -ltradsysdbapi -ltsclassrte -ltsrectypestrack -lmisapienums -lmis -ltradsystypes -la_cdrdb
+
+# -*- makefile -*-
+# Generated on sundev31 at Wed Apr 22 10:28:30 2015 by yzhang744 using:
+# /bbsrc/bin/prod/bin/bde_metamkmk.pl '-t' 'pekludge' 'breguisvc.mk'
+# $Id$ $CSID$
+
+TASK=breguisvc.tsk
+
+###
+### DO NOT CHANGE THE DEFINITION OF THE 'MSGOBJS' MACRO
+###
+MSGOBJS=\
+s_breguisvc_messages.o \
+s_breguisvc_schema.o \
+s_breguisvc_schemautil.o
+
+OBJS=\
+$(MSGOBJS) \
+s_breguisvc_buildopts.o \
+s_breguisvc_manifest.o \
+s_breguisvc_entry.o \
+s_breguisvc_requestcontext.o \
+s_breguisvc_requestrouter.o \
+s_breguisvc_requestprocessor.o \
+s_breguisvc_version.o \
+s_breguisvc_versiontag.o \
+s_brgdvsvc_messages.o \
+breguisvc.m.o \
+breguisvc_dum.o \
+prqs_rc_api.o \
+s_breguisvc_breg_v3.o \
+s_breguisvc_helpers_v3.o \
+s_breguisvc_breg_v3_entry.o \
+s_breguisvc_breg_v3_node.o \
+s_breguisvc_breg_v3_value.o \
+s_breguisvc_breg_v3_prqs.o \
+s_breguisvc_breg_v3_tree.o \
+s_breguisvc_search_v3.o \
+s_breguisvc_breg_v3_checker.o \
+s_breguisvc_value_checker.o \
+
+# Use the SRCDIRS macro to specify subdirectories that should be searched in
+# addition to the current directory for source files. If SRCS has been
+# specified explicitly then SRCDIRS has no effect.
+#SRCDIRS=
+
+# remove this to disable checking for gcc warnings
+IS_GCC_WARNINGS_CLEAN=yes
+IS_BDE       = yes
+IS_PTHREAD   = yes
+IS_EXCEPTION = yes
+IS_TMGR      = yes
+
+IS_PEKLUDGE=yes
+
+USER_CFLAGS   += -I.
+USER_CPPFLAGS += -I.
+USER_FFLAGS   += -I.
+
+NOCOMPOBJS= \
+  $(NONBIGDUMMY)
+
+# Specify here which libraries from the RS_Suite you need, e.g.: xerces z
+
+RS_LIBS=
+
+# The LIBS macro should always contain $(INCLIBS) which is what llcalc
+# controls. You can add additional libraries in LIBS before $(INCLIBS) but not
+# after. llcalc will rewrite the INCLIBS macro completely each time it is run
+# so avoid making modifications to INCLIBS.
+
+LIBS= $(INCLIBS)
+
+LLCALC_PKG_INCLUDE =
+LLCALC_SET_INCLUDE =
+LLCALC_PKG_EXCLUDE =
+LLCALC_SET_EXCLUDE =
+
+# do not modify below this point
+METAMKMK_VER=1.0
+IS_CPPMAIN=1
+IS_DEPENDS_NATIVE=1
+MKINCL?=/bbsrc/mkincludes/
+include $(MKINCL)sourcelist.mk
+include $(LIBMACROS_MK)
+OBJS?=$(OBJS_AR)
+include $(MKINCL)machdep.newlink
+include $(MKINCL)linktask.newlink
+# vim:ft=make

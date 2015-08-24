@@ -20,6 +20,7 @@
 
 #include "breg_replacer.h"
 #include "expr_tree.h"
+#include "breg_options.h"
 
 
 #define log(s) (std::cout << s << std::endl )
@@ -36,6 +37,8 @@ namespace {
 
     
 struct data {
+    TreeManager treeManager;
+
 };
 
 
@@ -47,8 +50,7 @@ struct report : Report<data>
 
     Stmt const * node;
 
-    bool ignoreSideEffects;
-    
+    BregOptions options;
 
     //used to store else stmts removed removed
     std::vector<Stmt const*> elsesRemoved;
@@ -57,14 +59,14 @@ struct report : Report<data>
     std::vector<unsigned> bregLocations;
     std::vector<std::string> bregNames;
 
-    std::string getExprString(Expr const * expr);
+    std::vector<std::string> toolMessages;
+
     std::string getStmtBodyReplacement(CompoundStmt const * stmt, unsigned column);
 
     bool hasVarDecls(CompoundStmt const * stmt);
 
     void addChainedElses(Stmt const * stmt);
-    void rebuildCondition(std::unique_ptr<ExprTree>& node);
-    void removeBranch(std::unique_ptr<ExprTree>& node, Expr const * expr);
+
     
     void matchIf(BoundNodes const & nodes);
     void operator()();
@@ -85,34 +87,52 @@ static const internal::DynTypedMatcher dyn_matchIf()
 report::report(Analyser& analyser, PPObserver::CallbackType type)
     : Report<data>(analyser, type)
 {
-    std::string csvFile = a.config()->value("breg_file"); 
-    ignoreSideEffects = a.config()->value("side_effects") == "true";
+    std::string csvFile = a.config()->value("breg_file");
+    
+    this->options = BregOptions();
+    this->options.ignoreSideEffects = a.config()->value("side_effects") == "true";
 
-    auto arr = readCSV(csvFile);
+    auto csvData = readCSV(csvFile);
 
-    bregNames.resize(arr.size());
+    this->bregNames.resize(csvData.size());
 
-    for ( auto e : arr ) {
-        bregNames.push_back(e.first);
+    for ( auto e : csvData ) {
+        this->bregNames.push_back(e.first);
     }
 }
 
-//remove includes
+// remove includes
+
 void report::operator()(SourceLocation where, bool, std::string const& name)
 {
     for (std::string bregName : bregNames) {
+
         if ( name.find( bregName ) != std::string::npos ) {
-            SourceRange range = SourceRange(where, where.getLocWithOffset(11 + name.length()));  //#include <> + name.length
-            a.ReplaceText(a.get_full_range(range), "");
+
+            // #include <> + name.length
+            SourceRange range = SourceRange( where, 
+                                             where.getLocWithOffset( 11 + name.length() ) ); 
+            a.ReplaceText( a.get_full_range(range), "" );
         }
+
     }
 }
 
+// remove bregs 
 
 void report::operator()()
 {
     std::ifstream bregFile;
     bregFile.open(".bregLocs");
+
+    this->d.treeManager = TreeManager( &a,
+                                       a.context(), 
+                                       &m, 
+                                       this->options, 
+                                       &this->toolMessages );
+
+
+    // read breg locations 
     if ( bregFile.is_open() ) {
         std::string locStr;
         while (std::getline(bregFile, locStr)) {
@@ -120,31 +140,53 @@ void report::operator()()
         }
     }
     else {
-        return; //nothing to be done, no bregs found
+        // nothing to be done, no bregs found
+        return; 
     }
     bregFile.close();
 
+    // match bregs 
     MatchFinder finder;
     csabase::OnMatch<report, &report::matchIf> m(this);
     finder.addDynamicMatcher(dyn_matchIf(), &m);
     finder.match(*a.context()->getTranslationUnitDecl(), *a.context());
-}
-
-void report::addChainedElses(Stmt const * stmt) {
-    if (stmt != nullptr ) { 
-        IfStmt const * ifStmt = llvm::dyn_cast<IfStmt>(stmt);
-        if (ifStmt != nullptr) {
-            elsesRemoved.push_back(ifStmt);
-            addChainedElses(ifStmt->getElse());
+    
+    // output tool information
+   
+    if ( this->options.silent == false ) {
+        for ( auto m : toolMessages) {
+            std::cout << m; 
         }
     }
 }
 
+// recursively adds else stmts
+
+void report::addChainedElses(Stmt const * stmt) 
+{
+    // stmt is null when there are no more else stmts
+    if (stmt != nullptr ) { 
+        IfStmt const * ifStmt = llvm::dyn_cast<IfStmt>(stmt);
+
+        if (ifStmt != nullptr) {
+
+            // collect elses that have been removed 
+            elsesRemoved.push_back(ifStmt);
+            addChainedElses(ifStmt->getElse());
+        }
+    }
+
+}
+
+// check if the body has variable declations 
+
 bool report::hasVarDecls(CompoundStmt const * stmt)
 {
-    for (auto iter = stmt->body_begin(); iter != stmt->body_end(); iter++) {
+    for (auto iter = stmt->body_begin(); iter < stmt->body_end(); iter++) {
         Stmt const * s = *iter;
         clang::DeclStmt const * varDeclStmt = llvm::dyn_cast<clang::DeclStmt>(s);
+
+        // stmt is a variable declaration 
         if (varDeclStmt != nullptr) {
             return true;
         }
@@ -153,131 +195,95 @@ bool report::hasVarDecls(CompoundStmt const * stmt)
     return false;
 }
 
+// get the stmts within the body with correct indentation
+
 std::string report::getStmtBodyReplacement(CompoundStmt const * stmt, unsigned column)
 {
-    if ( stmt->body_empty() ) {
-        return "";
-    }
-    Stmt const * firstStmt = *( stmt->body_begin() );
-    SourceLocation stmtEnd = m.getFileLoc(Lexer::getLocForEndOfToken( firstStmt->getLocEnd(), 0, m, a.context()->getLangOpts()));
+    std::string replacement;
 
-    SourceRange range = SourceRange( firstStmt->getLocStart(), stmtEnd );
-    
-    std::string replacement = a.get_source(range, true).str() + ";\n";
-    if ( replacement == ";;" ) {
-        replacement = ";";
-    }
-    
-    for (auto iter = stmt->body_begin()+1; iter != stmt->body_end(); iter++) {
-        Stmt const * s = *iter;
-                    
-        SourceLocation stmtEnd = m.getFileLoc(Lexer::getLocForEndOfToken( s->getLocEnd(), 0, m, a.context()->getLangOpts()));
+    if ( stmt->body_empty() == false ) {
+        
+        // first stmt has correct indentation already 
+        Stmt const * firstStmt = *( stmt->body_begin() );
+        SourceLocation stmtEnd = m.getFileLoc(Lexer::getLocForEndOfToken( firstStmt->getLocEnd(), 0, m, a.context()->getLangOpts()));
+        SourceRange range = SourceRange( firstStmt->getLocStart(), stmtEnd );
+        replacement = a.get_source(range, true).str() + ";\n";
 
-        SourceRange r = SourceRange( s->getLocStart(), stmtEnd );
-        replacement += std::string(column-1, ' ') + a.get_source(r, true).str() + ";\n";
+
+        // if the stmt was just a semi colon 
+        if ( replacement == ";;" ) {
+            replacement = ";";
+        }
+
+        for (auto iter = stmt->body_begin()+1; iter < stmt->body_end(); iter++) {
+            Stmt const * s = *iter;
+
+            SourceLocation stmtEnd = m.getFileLoc(Lexer::getLocForEndOfToken( s->getLocEnd(), 0, m, a.context()->getLangOpts()));
+            SourceRange r = SourceRange( s->getLocStart(), stmtEnd );
+
+            // indent the correct amount before the stmt
+            replacement += std::string(column-1, ' ') + a.get_source(r, true).str() + ";\n";
+        }
     }
+
     return replacement;
 }
 
-void report::rebuildCondition(std::unique_ptr<ExprTree>& node) 
-{
-    if ( node->binary ) {
-        //only one branch will ever be removed 
-        if ( !node->lhs->removable ) {
-            rebuildCondition( node->lhs );
-        }
-        else if ( node->op == "&&" || node->op == "||" ) {
-            removeBranch(node->rhs, node->clangNode);
-        }
-
-        if ( !node->rhs->removable ) {
-            rebuildCondition( node->rhs );
-        }
-        else if ( node->op == "&&" || node->op == "||" )  {
-            removeBranch(node->lhs, node->clangNode);
-        }
-    }
-    else if ( node->lhs != nullptr ) {
-        if ( !node->lhs->removable ) {
-            rebuildCondition( node->lhs );
-        }
-    }
-}
-
-void report::removeBranch(std::unique_ptr<ExprTree>& node, Expr const * expr)
-{
-    SourceLocation end = m.getFileLoc(Lexer::getLocForEndOfToken( expr->getLocEnd(), 0, m, a.context()->getLangOpts()));
-    SourceRange rangeToBeReplaced = SourceRange( expr->getLocStart(), end );
-     
-    unsigned length = rangeToBeReplaced.getEnd().getRawEncoding() - rangeToBeReplaced.getBegin().getRawEncoding();
-    Replacement replace = Replacement( a.manager(), rangeToBeReplaced.getBegin(), length, getExprString(node->clangNode) );
-    replace.apply( a.rewriter() );
-
-    rangeToBeReplaced.getBegin().dump(a.manager());
-    std::cout << ": ";
-    std::cout << "replacing condition: " << "'" << a.get_source(rangeToBeReplaced).str() << "'" << std::endl << std::endl;
-    std::cout << " with: " << "'" << getExprString(node->clangNode) << "'" << std::endl << std::endl;
-}
-
-std::string report::getExprString(Expr const * expr) 
-{
-    SourceLocation end = m.getFileLoc(Lexer::getLocForEndOfToken( expr->getLocEnd(), 0, m, a.context()->getLangOpts()));
-    SourceRange range = SourceRange( expr->getLocStart(), end );
-    return a.get_source(range, true).str();
-}
 
 void report::matchIf(BoundNodes const & nodes)
 {
-
     FunctionDecl const * func = nodes.getNodeAs<FunctionDecl>("func");
     IfStmt const * ifStmt = nodes.getNodeAs<IfStmt>("ifstmt");
 
-    auto found = std::find(bregLocations.begin(), bregLocations.end(), ifStmt->getLocStart().getRawEncoding());
-
-    if ( found == bregLocations.end() ) {
+    auto bregLocFound = std::find(bregLocations.begin(), bregLocations.end(), ifStmt->getLocStart().getRawEncoding());
+    auto elseFound = std::find( elsesRemoved.begin(), elsesRemoved.end(), ifStmt );
+    
+    if ( elseFound != elsesRemoved.end() || bregLocFound == bregLocations.end() ) {
         return;
     }
-    else {
-        *found = 0; //don't check this one again 
-    }
-        
-    //check if this if stmt has been removed already
-    for ( auto e : elsesRemoved ) {
-        if (e == ifStmt) {
-            return;
-        }
-    }
-
-    bool expressionValue = true;
-    bool evaluated = ifStmt->getCond()->EvaluateAsBooleanCondition(expressionValue, *a.context());
-
-    bool hasPossibleSideEffects = ifStmt->getCond()->HasSideEffects( *a.context() );
 
     bool modifyIf = false;
+    bool expressionValue = true;
+
+    bool evaluated = ifStmt->getCond()->EvaluateAsBooleanCondition(expressionValue, *a.context());
+    bool hasPossibleSideEffects = ifStmt->getCond()->HasSideEffects( *a.context() );
+
+    std::string replacement;
+    SourceRange rangeToBeReplaced;
 
     if ( evaluated && !hasPossibleSideEffects ) {
         modifyIf = true;
     }
     else {
-        std::unique_ptr<ExprTree> node( new ExprTree(nullptr, nullptr, false, ignoreSideEffects, ifStmt->getCond(), a.context(), &m) );
+        this->d.treeManager.setCurrentExpr( ifStmt->getCond() );
 
-        node->pruneTree();
+        this->d.treeManager.pruneCurrentExprTree();
 
-        if ( node->removable == true ) {
+        if ( this->d.treeManager.currentExprTreeRemovable() == true ) {
             modifyIf = true;
         }
-        else { // if stmt cannot be altered, branches of condition expression may be removed though 
-            rebuildCondition( node );
+        else { // if stmt cannot be altered, branches of condition expression may be removed though
+            std::string newCondition = this->d.treeManager.rebuildCurrentExprTree();
+
+            if ( evaluated && this->options.conditionExtraction == false ) {
+                modifyIf = true;
+                replacement = newCondition + ";\n";
+            }
+            else {
+                SourceLocation end = m.getFileLoc(Lexer::getLocForEndOfToken( ifStmt->getCond()->getLocEnd(), 0, m, a.context()->getLangOpts()));
+                rangeToBeReplaced = SourceRange( ifStmt->getCond()->getLocStart(), end );
+                replacement = newCondition;
+            }
         }
     }
 
-
-    if ( modifyIf ) { // if stmt can change immediately, either the body can go or the condition can go
+    // if stmt can change immediately, either the body can go or the condition can go
+    if ( modifyIf ) { 
 
         Stmt const * elseStmt = ifStmt->getElse();
 
-        std::string replacement;   
-        SourceRange rangeToBeReplaced = SourceRange(ifStmt->getLocStart(), ifStmt->getLocEnd().getLocWithOffset(1));
+        //std::string replacement;   
+        rangeToBeReplaced = SourceRange(ifStmt->getLocStart(), ifStmt->getLocEnd().getLocWithOffset(1));
 
         if (expressionValue == true) { //replace entire if stmt with body of if
 
@@ -297,11 +303,11 @@ void report::matchIf(BoundNodes const & nodes)
                 }
                 else if ( hasVars ) { // braces must remain 
                     SourceRange replacementRange = SourceRange(body->getLBracLoc(), body->getRBracLoc().getLocWithOffset(1));
-                    replacement = a.get_source(replacementRange, true).str();
+                    replacement += a.get_source(replacementRange, true).str();
                 }
                 else { // braces can be removed 
                     unsigned columnNumber = a.manager().getPresumedColumnNumber(ifStmt->getLocStart());
-                    replacement = getStmtBodyReplacement(body, columnNumber);
+                    replacement += getStmtBodyReplacement(body, columnNumber);
                 }
             }
 
@@ -314,7 +320,7 @@ void report::matchIf(BoundNodes const & nodes)
             if ( elseStmt != nullptr ) {
                 
                 SourceRange elseRange = SourceRange(elseStmt->getLocStart().getLocWithOffset(0), ifStmt->getLocEnd().getLocWithOffset(1));
-                replacement = a.get_source(elseRange, true).str();
+                replacement += a.get_source(elseRange, true).str();
 
                 CompoundStmt const * elseBody = llvm::dyn_cast<CompoundStmt>( elseStmt );
 
@@ -323,22 +329,22 @@ void report::matchIf(BoundNodes const & nodes)
                     
                     if ( !hasVars ) {
                         unsigned columnNumber = a.manager().getPresumedColumnNumber(ifStmt->getLocStart());
-                        replacement = getStmtBodyReplacement(elseBody, columnNumber);
+                        replacement += getStmtBodyReplacement(elseBody, columnNumber);
                     }
                 }
             }
-        }
-        
-        unsigned length = rangeToBeReplaced.getEnd().getRawEncoding() - rangeToBeReplaced.getBegin().getRawEncoding();
-        Replacement replace = Replacement( a.manager(), rangeToBeReplaced.getBegin(), length, replacement );
-        replace.apply( a.rewriter() );
+        }        
     }
+    unsigned length = rangeToBeReplaced.getEnd().getRawEncoding() - rangeToBeReplaced.getBegin().getRawEncoding();
+    Replacement replace = Replacement( a.manager(), rangeToBeReplaced.getBegin(), length, replacement );
+    replace.apply( a.rewriter() );
+
 }
 
 
 void subscribe(Analyser& analyser, Visitor& visitor, PPObserver& observer) {
     observer.onInclude += report(analyser);
-    analyser.onTranslationUnitDone += report(analyser); 
+    analyser.onTranslationUnitDone += report(analyser);
 }
 
 }  // close anonymous namespace

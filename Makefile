@@ -4,6 +4,7 @@ PREFIX     ?= $(firstword $(wildcard /opt/bb /usr))
 LLVMDIR    ?= $(PREFIX)
 
 SYSTEM     := $(shell uname -s)
+PROCESSOR   = $(shell uname -p)
 DESTDIR    ?= $(PREFIX)
 
 GCCVERSION  = 4.9.2
@@ -12,13 +13,21 @@ CXX         = $(GCCDIR)/bin/g++
 
 
 TARGET      = bde_verify_bin
+
 CSABASE     = csabase
 LCB         = bde-verify
-LUL         = bde-verify-util
 LIBCSABASE  = lib$(LCB).a
-LIBCSAUTIL  = lib$(LUL).a
 CSABASEDIR  = groups/csa/csabase
+
+CSAUTIL     = csautil
+LCU         = bde-verify-util
+LIBCSAUTIL  = lib$(LCU).a
 CSAUTILDIR  = groups/csa/csautil
+
+AET         = aet
+LAET        = aet
+LIBAET      = lib$(LAET).a
+AETDIR      = /bb/mbig/mbig3170/ts/et/git/aimet/aet/aetutils
 
 CXXFLAGS   += -m64 -std=c++11
 CXXFLAGS   += -Wall -Wno-unused-local-typedefs
@@ -33,6 +42,7 @@ endif
 
 ifeq ($(SYSTEM),Linux)
     AR          = /usr/bin/ar
+	ARCHCODE    = linux
     LIBDIRS     = $(GCCDIR)/lib64                                             \
                   $(PREFIX)/lib64                                             \
                   /opt/swt/lib64                                              \
@@ -60,7 +70,13 @@ OBJ        := $(SYSTEM)-$(notdir $(CXX))
 
 # Set up location of clang headers and libraries needed by bde_verify.
 INCFLAGS   += -I$(LLVMDIR)/include
+INCFLAGS   += -I/bb/build/$(SYSTEM)-$(PROCESSOR)-64/release/robolibs/trunk/lib/dpkgroot/opt/bb/include/  
 LDFLAGS    += -L$(LLVMDIR)/lib -L$(CSABASEDIR)/$(OBJ) -L$(CSAUTILDIR)/$(OBJ)
+LDFLAGS    += -L$(AETDIR)/$(OBJ) -L./breguisvcmsg 
+LDFLAGS    += -L/bb/build/$(SYSTEM)-$(PROCESSOR)-64/release/robolibs/trunk/lib/
+LDFLAGS    += -L/bb/build/$(SYSTEM)-$(PROCESSOR)-64/release/robolibs/trunk/lib/dpkgroot/opt/bb/lib64/robo/
+LDFLAGS    += -L/bb/build/$(SYSTEM)-$(PROCESSOR)-64/release/robolibs/trunk/lib/dpkgroot/opt/bb/lib64/
+
 
 VERBOSE ?= @
 
@@ -75,12 +91,47 @@ CXXFILES =                                                                    \
 
 DEFFLAGS += -D__STDC_LIMIT_MACROS -D__STDC_CONSTANT_MACROS
 INCFLAGS += -I. -I$(CSABASEDIR) -I$(CSAUTILDIR) -Igroups/csa/csadep
+ 
+
 CXXFLAGS += -g -fno-common -fno-strict-aliasing -fno-exceptions -fno-rtti
 
 OFILES = $(CXXFILES:%.cpp=$(OBJ)/%.o)
 
+EXTRALIBS +=  -lbte              											  \
+			  -lbce              											  \
+			  -lbae              											  \
+			  -lbas  														  \
+			  -lbde  														  \
+			  -lbsc  														  \
+			  -lbsl  													 	  \
+			  -lbae.opt_exc_mt_64  										  	  \
+			  -lbte.opt_exc_mt_64  										  	  \
+			  -lbce.opt_exc_mt_64  										  	  \
+			  -lbde.opt_exc_mt_64  										  	  \
+			  -lbdl.opt_exc_mt_64  										  	  \
+			  -lpthread  													  \
+			  -la_baslt  													  \
+			  -lparmsbase  												  	  \
+			  -lbsc  														  \
+			  -lbsi  														  \
+			  -le_ipc  												      	  \
+			  -lbbmsgbufs  												  	  \
+			  -lbbipc  													   	  \
+			  -lsysutil  													  \
+			  -lbae.opt_exc_mt_64  										  	  \
+			  -lbte.opt_exc_mt_64  										  	  \
+			  -lbce.opt_exc_mt_64  										  	  \
+			  -lbde.opt_exc_mt_64  										  	  \
+			  -lbdl.opt_exc_mt_64  										  	  \
+			  -lbsl.opt_exc_mt_64  										  	  \
+			  -lm  														  	  \
+			  -lopenbsd-compat  											  \
+			  -lrt  														  \
+
 LIBS     =    -l$(LCB)                                                        \
-			  -l$(LUL)                                                        \
+			  -l$(LCU)                                                        \
+			  -l$(LAET)                                                       \
+			  -lbreguisvcmsg.$(ARCHCODE)                                      \
               -lLLVMX86Info                                                   \
               -lLLVMSparcInfo                                                 \
               -lclangFrontendTool                                             \

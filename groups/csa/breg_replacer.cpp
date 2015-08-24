@@ -19,8 +19,11 @@
 #include <sstream>
 #include <map>
 
+#include <csautil_bregistry.h>
+
 
 using namespace csabase;
+using namespace csautil;
 using namespace clang;
 using namespace clang::ast_matchers;
 using namespace clang::tooling;
@@ -103,6 +106,13 @@ namespace {
     {
         if (pair.second == defaultValue) {
             //hook database code in here
+            
+            //BREGEntryInfo bregInfo;
+            
+            //BRegistry::getEntryInformation( bregInfo, "bbit_enable_create_allocation_per_route" );
+           
+            //std::cout << bregInfo.d_prodValue << std::endl;
+
             return false;
         }
         

@@ -116,6 +116,8 @@ bool refFunction() {
 //
 //stmt ( declStmt( ptrVarDecl ( hasInitialiser() ) ) )
 
+
+
 void f() 
 { 
     if (bbit_send_to_omx__value() && q()) {
@@ -211,7 +213,7 @@ void f()
     }
 
     //remove breg call deep in condition
-    if (bool( (  ( (c1 == true && c2 == true) || c3) || ( bregF__value() == true ) ) || (v1 == 'c') )) {
+    if ( (  ( (c1 == true && c2 == true) || c3) || ( bregF__value() == true ) ) || (v1 == 'c') ) {
         int asd;
     }
 
@@ -314,5 +316,15 @@ void f()
         ;
     }
     
+
+    if ( ( ( (c1 == true && c2 == true) || c3) || ( bregF__value() == true ) ) || false ) {
+        int asd;
+    }
+
+     //function with reference side effects
+    if ( refFunction() && bregF__value() ) {
+        ;
+    }
+
 
 }
