@@ -67,7 +67,10 @@ struct report : Report<data>
 
     void addChainedElses(Stmt const * stmt);
 
-    
+    std::pair<std::string, SourceRange> rebuildIfStmt(bool expressionValue, 
+                                                      IfStmt const * ifStmt, 
+                                                      FunctionDecl const * func); 
+
     void matchIf(BoundNodes const & nodes);
     void operator()();
     void operator()(SourceLocation where, bool, std::string const& name); 
@@ -230,6 +233,71 @@ std::string report::getStmtBodyReplacement(CompoundStmt const * stmt, unsigned c
 }
 
 
+std::pair<std::string, SourceRange> report::rebuildIfStmt(bool expressionValue, IfStmt const * ifStmt, FunctionDecl const * func ) 
+{
+    SourceRange rangeToBeReplaced;
+    std::string replacement;
+
+    Stmt const * elseStmt = ifStmt->getElse();
+
+    //std::string replacement;   
+    rangeToBeReplaced = SourceRange(ifStmt->getLocStart(), ifStmt->getLocEnd().getLocWithOffset(1));
+
+    if (expressionValue == true) { //replace entire if stmt with body of if
+
+        CompoundStmt const * body = static_cast<CompoundStmt const*>( ifStmt->getThen() );
+        bool hasVars = hasVarDecls( body ); // does the if body has var decls 
+
+        if (body->body_back() != nullptr) {
+            ReturnStmt const * ret = llvm::dyn_cast<ReturnStmt>( body->body_back() );
+
+            if ( ret != nullptr ) {
+                CompoundStmt const * funcBody = llvm::dyn_cast<CompoundStmt>( func->getBody() );
+                if ( funcBody != nullptr ) {
+                    rangeToBeReplaced = SourceRange(ifStmt->getLocStart(), funcBody->getLocEnd());
+                    unsigned columnNumber = a.manager().getPresumedColumnNumber(ifStmt->getLocStart());
+                    replacement = getStmtBodyReplacement(body, columnNumber);
+                }
+            }
+            else if ( hasVars ) { // braces must remain 
+                SourceRange replacementRange = SourceRange(body->getLBracLoc(), body->getRBracLoc().getLocWithOffset(1));
+                replacement += a.get_source(replacementRange, true).str();
+            }
+            else { // braces can be removed 
+                unsigned columnNumber = a.manager().getPresumedColumnNumber(ifStmt->getLocStart());
+                replacement += getStmtBodyReplacement(body, columnNumber);
+            }
+        }
+
+        if ( elseStmt != nullptr ) { 
+            addChainedElses( elseStmt ); //store else statements removed 
+        }   
+    }
+    else { //removes the if stmt, leaves the else parts if there are any
+
+        if ( elseStmt != nullptr ) {
+
+            SourceRange elseRange = SourceRange(elseStmt->getLocStart().getLocWithOffset(0), ifStmt->getLocEnd().getLocWithOffset(1));
+            replacement += a.get_source(elseRange, true).str();
+
+            CompoundStmt const * elseBody = llvm::dyn_cast<CompoundStmt>( elseStmt );
+
+            if (elseBody != nullptr) {
+                bool hasVars = hasVarDecls( elseBody ); 
+
+                if ( !hasVars ) {
+                    unsigned columnNumber = a.manager().getPresumedColumnNumber(ifStmt->getLocStart());
+                    replacement += getStmtBodyReplacement(elseBody, columnNumber);
+                }
+            }
+        }
+    }
+
+    return std::pair<std::string, SourceRange>(replacement, rangeToBeReplaced);
+}
+
+
+
 void report::matchIf(BoundNodes const & nodes)
 {
     FunctionDecl const * func = nodes.getNodeAs<FunctionDecl>("func");
@@ -238,108 +306,44 @@ void report::matchIf(BoundNodes const & nodes)
     auto bregLocFound = std::find(bregLocations.begin(), bregLocations.end(), ifStmt->getLocStart().getRawEncoding());
     auto elseFound = std::find( elsesRemoved.begin(), elsesRemoved.end(), ifStmt );
     
-    if ( elseFound != elsesRemoved.end() || bregLocFound == bregLocations.end() ) {
-        return;
-    }
+    if ( !( elseFound != elsesRemoved.end() || bregLocFound == bregLocations.end() ) ) {
+        bool modifyIf = true;
+        bool expressionValue = true;
 
-    bool modifyIf = false;
-    bool expressionValue = true;
+        bool evaluated = ifStmt->getCond()->EvaluateAsBooleanCondition(expressionValue, *a.context());
+        bool hasPossibleSideEffects = ifStmt->getCond()->HasSideEffects( *a.context() );
 
-    bool evaluated = ifStmt->getCond()->EvaluateAsBooleanCondition(expressionValue, *a.context());
-    bool hasPossibleSideEffects = ifStmt->getCond()->HasSideEffects( *a.context() );
+        std::string replacement;
+        SourceRange rangeToBeReplaced;
 
-    std::string replacement;
-    SourceRange rangeToBeReplaced;
-
-    if ( evaluated && !hasPossibleSideEffects ) {
-        modifyIf = true;
-    }
-    else {
-        this->d.treeManager.setCurrentExpr( ifStmt->getCond() );
-
-        this->d.treeManager.pruneCurrentExprTree();
-
-        if ( this->d.treeManager.currentExprTreeRemovable() == true ) {
-            modifyIf = true;
-        }
-        else { // if stmt cannot be altered, branches of condition expression may be removed though
-            std::string newCondition = this->d.treeManager.rebuildCurrentExprTree();
-
-            if ( evaluated && this->options.conditionExtraction == false ) {
-                modifyIf = true;
+        if ( !evaluated || hasPossibleSideEffects ) {
+            this->d.treeManager.setCurrentExpr( ifStmt->getCond() );
+            this->d.treeManager.pruneCurrentExprTree();
+            if ( this->d.treeManager.currentExprTreeRemovable() == false ) {
+                std::string newCondition = this->d.treeManager.rebuildCurrentExprTree();
                 replacement = newCondition + ";\n";
-            }
-            else {
-                SourceLocation end = m.getFileLoc(Lexer::getLocForEndOfToken( ifStmt->getCond()->getLocEnd(), 0, m, a.context()->getLangOpts()));
-                rangeToBeReplaced = SourceRange( ifStmt->getCond()->getLocStart(), end );
-                replacement = newCondition;
+
+                // changing condition only
+                if ( !evaluated || this->options.conditionExtraction == false ) {
+                    SourceLocation end = m.getFileLoc(Lexer::getLocForEndOfToken( ifStmt->getCond()->getLocEnd(), 0, m, a.context()->getLangOpts()));
+                    rangeToBeReplaced = SourceRange( ifStmt->getCond()->getLocStart(), end );
+                    replacement = newCondition;
+                    modifyIf = false;
+                }
             }
         }
-    }
 
-    // if stmt can change immediately, either the body can go or the condition can go
-    if ( modifyIf ) { 
-
-        Stmt const * elseStmt = ifStmt->getElse();
-
-        //std::string replacement;   
-        rangeToBeReplaced = SourceRange(ifStmt->getLocStart(), ifStmt->getLocEnd().getLocWithOffset(1));
-
-        if (expressionValue == true) { //replace entire if stmt with body of if
-
-            CompoundStmt const * body = static_cast<CompoundStmt const*>( ifStmt->getThen() );
-            bool hasVars = hasVarDecls( body ); // does the if body has var decls 
-           
-            if (body->body_back() != nullptr) {
-                ReturnStmt const * ret = llvm::dyn_cast<ReturnStmt>( body->body_back() );
-            
-                if ( ret != nullptr ) {
-                    CompoundStmt const * funcBody = llvm::dyn_cast<CompoundStmt>( func->getBody() );
-                    if ( funcBody != nullptr ) {
-                        rangeToBeReplaced = SourceRange(ifStmt->getLocStart(), funcBody->getLocEnd());
-                        unsigned columnNumber = a.manager().getPresumedColumnNumber(ifStmt->getLocStart());
-                        replacement = getStmtBodyReplacement(body, columnNumber);
-                    }
-                }
-                else if ( hasVars ) { // braces must remain 
-                    SourceRange replacementRange = SourceRange(body->getLBracLoc(), body->getRBracLoc().getLocWithOffset(1));
-                    replacement += a.get_source(replacementRange, true).str();
-                }
-                else { // braces can be removed 
-                    unsigned columnNumber = a.manager().getPresumedColumnNumber(ifStmt->getLocStart());
-                    replacement += getStmtBodyReplacement(body, columnNumber);
-                }
-            }
-
-            if ( elseStmt != nullptr ) { 
-                addChainedElses( elseStmt ); //store else statements removed 
-            }   
+        if ( modifyIf == true ) {
+            std::pair<std::string, SourceRange> p = rebuildIfStmt(expressionValue, ifStmt, func);
+            replacement += p.first;
+            rangeToBeReplaced = p.second;
         }
-        else { //removes the if stmt, leaves the else parts if there are any
-            
-            if ( elseStmt != nullptr ) {
-                
-                SourceRange elseRange = SourceRange(elseStmt->getLocStart().getLocWithOffset(0), ifStmt->getLocEnd().getLocWithOffset(1));
-                replacement += a.get_source(elseRange, true).str();
 
-                CompoundStmt const * elseBody = llvm::dyn_cast<CompoundStmt>( elseStmt );
-
-                if (elseBody != nullptr) {
-                    bool hasVars = hasVarDecls( elseBody ); 
-                    
-                    if ( !hasVars ) {
-                        unsigned columnNumber = a.manager().getPresumedColumnNumber(ifStmt->getLocStart());
-                        replacement += getStmtBodyReplacement(elseBody, columnNumber);
-                    }
-                }
-            }
-        }        
+        unsigned length = rangeToBeReplaced.getEnd().getRawEncoding() - rangeToBeReplaced.getBegin().getRawEncoding();
+        Replacement replace = Replacement( a.manager(), rangeToBeReplaced.getBegin(), length, replacement );
+        replace.apply( a.rewriter() );
     }
-    unsigned length = rangeToBeReplaced.getEnd().getRawEncoding() - rangeToBeReplaced.getBegin().getRawEncoding();
-    Replacement replace = Replacement( a.manager(), rangeToBeReplaced.getBegin(), length, replacement );
-    replace.apply( a.rewriter() );
-
-}
+} 
 
 
 void subscribe(Analyser& analyser, Visitor& visitor, PPObserver& observer) {

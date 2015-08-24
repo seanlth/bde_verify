@@ -322,8 +322,8 @@ void f()
     }
 
      //function with reference side effects
-    if ( refFunction() && bregF__value() ) {
-        ;
+    if ( refFunction() || bregT__value() ) {
+        int var = 0;
     }
 
 
